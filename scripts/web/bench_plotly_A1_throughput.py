@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
-import pyedflib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -42,6 +41,7 @@ from benchkit.common import out_dir, write_manifest
 from benchkit.lexicon import (
     BENCH_A1,
     FMT_EDF,
+    FMT_NWB,
     OVL_OFF,
     CACHE_WARM,
     SEQ_PAN,
@@ -50,111 +50,46 @@ from benchkit.lexicon import (
     SEQ_ZOOM_OUT,
     TOOL_PLOTLY,
 )
+from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
 
 
-def load_edf_segment(
+def load_segment(
     path: Path,
+    fmt: str,
     load_start_s: float,
     load_duration_s: float,
     n_channels_max: int,
     max_points_per_trace: int,
+    nwb_series_path: str | None,
+    nwb_time_dim: str,
 ) -> Tuple[List[float], List[List[float]], float, int, float, float, int]:
-    """
-    Returns:
-      (times_list, data_list[ch], fs, n_ch, start, dur, decim_factor)
+    if fmt == FMT_EDF:
+        seg = load_edf_segment_pyedflib(path, load_start_s, load_duration_s, n_channels_max)
+    elif fmt == FMT_NWB:
+        seg = load_nwb_segment_pynwb(
+            path,
+            load_start_s,
+            load_duration_s,
+            n_channels_max,
+            series_path=nwb_series_path,
+            time_dim=nwb_time_dim,
+        )
+    else:
+        raise ValueError(f"Unsupported format: {fmt}")
 
-    Robust EDF reader:
-    - skips annotation-like channels
-    - keeps channels that match channel-0 sampling frequency (no resampling)
-    - clamps to the shortest available length across chosen channels
-    - decimates to keep generated HTML responsive
-    """
-    with pyedflib.EdfReader(str(path)) as f:
-        labels = [str(x).strip() for x in f.getSignalLabels()]
-        ns_all = [int(x) for x in f.getNSamples()]
-        fs_all = [float(f.getSampleFrequency(i)) for i in range(len(labels))]
-
-        if not fs_all:
-            raise RuntimeError(f"No signals found in EDF: {path}")
-
-        fs0 = fs_all[0]
-
-        cand: List[int] = []
-        for i, (lab, fs_i, ns_i) in enumerate(zip(labels, fs_all, ns_all)):
-            if ns_i <= 1 or fs_i <= 0:
-                continue
-            if "annot" in lab.lower():
-                continue
-            if abs(fs_i - fs0) > 1e-6:
-                continue
-            cand.append(i)
-
-        # Fallback if filtering removed everything
-        if not cand:
-            cand = [
-                i
-                for i, (fs_i, ns_i) in enumerate(zip(fs_all, ns_all))
-                if fs_i > 0 and ns_i > 1
-            ]
-
-        if not cand:
-            raise RuntimeError(f"No usable numeric channels found in EDF: {path}")
-
-        cand = cand[: max(1, int(n_channels_max))]
-
-        n_min_total = min(ns_all[i] for i in cand)
-        total_dur = n_min_total / fs0
-
-        start = max(0.0, min(float(load_start_s), max(0.0, total_dur - 1e-6)))
-        start_samp = int(math.floor(start * fs0))
-
-        n_avail = n_min_total - start_samp
-        if n_avail <= 1:
-            raise ValueError(
-                f"Requested start={start:.6f}s (sample {start_samp}) leaves no data. "
-                f"total_dur={total_dur:.3f}s, n_min_total={n_min_total}, fs0={fs0}"
-            )
-
-        max_dur = n_avail / fs0
-        dur = min(float(load_duration_s), max_dur)
-
-        n_samples = min(int(math.floor(dur * fs0)), n_avail)
-        if n_samples <= 1:
-            raise ValueError(
-                f"Computed n_samples={n_samples} (dur={dur:.6f}s) is too small. "
-                f"start={start:.6f}s, total_dur={total_dur:.3f}s"
-            )
-
-        data_np = np.zeros((len(cand), n_samples), dtype=np.float32)
-        for out_ch, ch in enumerate(cand):
-            sig = np.asarray(f.readSignal(ch, start_samp, n_samples), dtype=np.float32)
-            if sig.size == 0:
-                raise ValueError(
-                    f"readSignal returned 0 samples for ch={ch} label='{labels[ch]}' "
-                    f"(start_samp={start_samp}, n_samples={n_samples})."
-                )
-            if sig.size < n_samples:
-                sig = np.pad(sig, (0, n_samples - sig.size), mode="edge")
-
-            # normalize (not part of interaction timing)
-            sig = sig - float(sig.mean())
-            sd = float(sig.std()) or 1.0
-            sig = sig / sd
-            data_np[out_ch, :] = sig
-
-    times_np = (np.arange(n_samples, dtype=np.float32) / fs0) + float(start)
-
-    # Decimate to keep HTML size reasonable.
-    decim = 1
-    if max_points_per_trace and max_points_per_trace > 0 and times_np.size > max_points_per_trace:
-        decim = int(math.ceil(times_np.size / max_points_per_trace))
-        times_np = times_np[::decim]
-        data_np = data_np[:, ::decim]
-
+    times_np, data_np, decim = decimate_for_display(seg.times_s, seg.data, max_points_per_trace)
     times = times_np.astype(float).tolist()
     data = [data_np[i, :].astype(float).tolist() for i in range(data_np.shape[0])]
-    return times, data, fs0, int(data_np.shape[0]), float(start), float(dur), int(decim)
+    return (
+        times,
+        data,
+        float(seg.fs_hz),
+        int(data_np.shape[0]),
+        float(seg.meta.get("start_s", load_start_s)),
+        float(seg.meta.get("duration_s", load_duration_s)),
+        int(decim),
+    )
 
 
 def render_html(
@@ -405,6 +340,7 @@ main().catch(e => console.error(e));
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
+    ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], default=FMT_EDF)
     ap.add_argument("--edf", type=str, required=True)
     ap.add_argument("--n-channels", type=int, default=8)
     ap.add_argument("--load-start", type=float, default=0.0)
@@ -427,33 +363,38 @@ def main() -> None:
         choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM, "ALL"],
         default="ALL",
     )
+    ap.add_argument("--nwb-series-path", type=str, default=None)
+    ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
 
     args = ap.parse_args()
 
     out_base = out_dir(args.out_root, BENCH_A1, TOOL_PLOTLY, args.tag)
-    write_manifest(out_base, BENCH_A1, TOOL_PLOTLY, vars(args), extra={'format': FMT_EDF})
+    write_manifest(out_base, BENCH_A1, TOOL_PLOTLY, vars(args), extra={'format': args.format})
     out_html = out_base / 'plotly_A1_interactions.html'
 
 
-    edf_path = args.data_dir / args.edf
-    if not edf_path.exists():
-        raise FileNotFoundError(edf_path)
+    data_path = args.data_dir / args.edf
+    if not data_path.exists():
+        raise FileNotFoundError(data_path)
 
-    times, data, fs, n_ch, start, dur, decim = load_edf_segment(
-        edf_path,
+    times, data, fs, n_ch, start, dur, decim = load_segment(
+        data_path,
+        args.format,
         args.load_start,
         args.load_duration,
         args.n_channels,
         args.max_points_per_trace,
+        args.nwb_series_path,
+        args.nwb_time_dim,
     )
 
     meta = {
         "bench_id": BENCH_A1,
         "tool": TOOL_PLOTLY,
-        "format": FMT_EDF,
+        "format": args.format,
         "overlay_state": args.overlay_state,
         "cache_state": args.cache_state,
-        "edf": edf_path.name,
+        "edf": data_path.name,
         "fs_hz": fs,
         "n_ch": n_ch,
         "start_s": start,
