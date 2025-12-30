@@ -18,8 +18,6 @@ Outputs (per bench):
 
 from __future__ import annotations
 
-import sys
-
 import argparse
 import time
 from dataclasses import dataclass
@@ -28,10 +26,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
 from benchkit.lexicon import (
