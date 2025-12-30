@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import sys
 
+import sys
+
 import argparse
 import time
 from dataclasses import dataclass
@@ -543,8 +545,14 @@ def main() -> None:
     df.to_csv(out_steps, index=False)
     print(f"Saved {out_steps} ({len(df)} rows)")
 
-    summary = summarize_step_df(df)
     out_sum = out_base / f"vispy_{bench_id}_summary.csv"
+    if df.empty:
+        summary = pd.DataFrame()
+        summary.to_csv(out_sum, index=False)
+        print(f"Saved {out_sum} (no rows)")
+        return
+
+    summary = summarize_step_df(df)
     summary.to_csv(out_sum, index=False)
     print(f"Saved {out_sum}")
     if "lat_p95_ms" in summary.columns:
