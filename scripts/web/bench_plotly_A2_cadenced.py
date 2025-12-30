@@ -23,6 +23,8 @@ Then open plotly_interactions.html and read the console output:
 
 from __future__ import annotations
 
+import sys
+
 import argparse
 import json
 import math
@@ -30,19 +32,37 @@ from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
-import pyedflib
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
-from benchkit.lexicon import BENCH_A2, FMT_EDF, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
+from benchkit.lexicon import (
+    BENCH_A2,
+    FMT_EDF,
+    FMT_NWB,
+    OVL_OFF,
+    CACHE_WARM,
+    SEQ_PAN,
+    SEQ_PAN_ZOOM,
+    SEQ_ZOOM_IN,
+    SEQ_ZOOM_OUT,
+    TOOL_PLOTLY,
+)
+from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
 
 
-def load_edf_segment(
+def load_segment(
     path: Path,
+    fmt: str,
     load_start_s: float,
     load_duration_s: float,
     n_channels_max: int,
     max_points_per_trace: int,
+    nwb_series_path: str | None,
+    nwb_time_dim: str,
 ) -> Tuple[List[float], List[List[float]], float, int, float, float, int]:
     """
     Returns:
@@ -54,44 +74,32 @@ def load_edf_segment(
     - clamps to the shortest available length across chosen channels
     - decimates to keep generated HTML responsive
     """
-    with pyedflib.EdfReader(str(path)) as f:
-        labels = [str(x).strip() for x in f.getSignalLabels()]
-        ns_all = [int(x) for x in f.getNSamples()]
-        fs_all = [float(f.getSampleFrequency(i)) for i in range(len(labels))]
+    if fmt == FMT_EDF:
+        seg = load_edf_segment_pyedflib(path, load_start_s, load_duration_s, n_channels_max)
+    elif fmt == FMT_NWB:
+        seg = load_nwb_segment_pynwb(
+            path,
+            load_start_s,
+            load_duration_s,
+            n_channels_max,
+            series_path=nwb_series_path,
+            time_dim=nwb_time_dim,
+        )
+    else:
+        raise ValueError(f"Unsupported format: {fmt}")
 
-        if not fs_all:
-            raise RuntimeError(f"No signals found in EDF: {path}")
-
-        fs0 = fs_all[0]
-
-        cand: List[int] = []
-        for i, (lab, fs_i, ns_i) in enumerate(zip(labels, fs_all, ns_all)):
-            if ns_i <= 1 or fs_i <= 0:
-                continue
-            if "annot" in lab.lower():
-                continue
-            if abs(fs_i - fs0) > 1e-6:
-                continue
-            cand.append(i)
-
-        # Fallback if filtering removed everything
-        if not cand:
-            cand = [
-                i
-                for i, (fs_i, ns_i) in enumerate(zip(fs_all, ns_all))
-                if fs_i > 0 and ns_i > 1
-            ]
-
-        if not cand:
-            raise RuntimeError(f"No usable numeric channels found in EDF: {path}")
-
-        cand = cand[: max(1, int(n_channels_max))]
-
-        n_min_total = min(ns_all[i] for i in cand)
-        total_dur = n_min_total / fs0
-
-        start = max(0.0, min(float(load_start_s), max(0.0, total_dur - 1e-6)))
-        start_samp = int(math.floor(start * fs0))
+    times_np, data_np, decim = decimate_for_display(seg.times_s, seg.data, max_points_per_trace)
+    times = times_np.astype(float).tolist()
+    data = [data_np[i, :].astype(float).tolist() for i in range(data_np.shape[0])]
+    return (
+        times,
+        data,
+        float(seg.fs_hz),
+        int(data_np.shape[0]),
+        float(seg.meta.get("start_s", load_start_s)),
+        float(seg.meta.get("duration_s", load_duration_s)),
+        int(decim),
+    )
 
         n_avail = n_min_total - start_samp
         if n_avail <= 1:
@@ -149,6 +157,7 @@ def render_html(
     window_s: float,
     target_interval_ms: float,
     steps: int,
+    sequences: List[str],
     out_path: Path,
 ) -> None:
     # Keep layout minimal to reduce overhead.
@@ -351,7 +360,7 @@ async function main() {{
   const steps = {steps};
   const windowS = {window_s};
 
-  const sequences = ["PAN_60S", "ZOOM_IN", "ZOOM_OUT", "PAN_ZOOM"];
+  const sequences = {json.dumps(sequences)};
   const results = [];
 
   for (const seq of sequences) {{
@@ -396,6 +405,7 @@ main().catch(e => console.error(e));
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
+    ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], default=FMT_EDF)
     ap.add_argument("--edf", type=str, required=True)
     ap.add_argument("--n-channels", type=int, default=8)
     ap.add_argument("--load-start", type=float, default=0.0)
@@ -413,33 +423,43 @@ def main() -> None:
     ap.add_argument("--tag", type=str, default="edf_A2")
     ap.add_argument("--overlay-state", type=str, default=OVL_OFF)
     ap.add_argument("--cache-state", type=str, default=CACHE_WARM)
+    ap.add_argument(
+        "--sequence",
+        choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM, "ALL"],
+        default="ALL",
+    )
+    ap.add_argument("--nwb-series-path", type=str, default=None)
+    ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
 
     args = ap.parse_args()
 
     out_base = out_dir(args.out_root, BENCH_A2, TOOL_PLOTLY, args.tag)
-    write_manifest(out_base, BENCH_A2, TOOL_PLOTLY, vars(args), extra={'format': FMT_EDF})
+    write_manifest(out_base, BENCH_A2, TOOL_PLOTLY, vars(args), extra={'format': args.format})
     out_html = out_base / 'plotly_A2_interactions.html'
 
 
-    edf_path = args.data_dir / args.edf
-    if not edf_path.exists():
-        raise FileNotFoundError(edf_path)
+    data_path = args.data_dir / args.edf
+    if not data_path.exists():
+        raise FileNotFoundError(data_path)
 
-    times, data, fs, n_ch, start, dur, decim = load_edf_segment(
-        edf_path,
+    times, data, fs, n_ch, start, dur, decim = load_segment(
+        data_path,
+        args.format,
         args.load_start,
         args.load_duration,
         args.n_channels,
         args.max_points_per_trace,
+        args.nwb_series_path,
+        args.nwb_time_dim,
     )
 
     meta = {
         "bench_id": BENCH_A2,
         "tool": TOOL_PLOTLY,
-        "format": FMT_EDF,
+        "format": args.format,
         "overlay_state": args.overlay_state,
         "cache_state": args.cache_state,
-        "edf": edf_path.name,
+        "edf": data_path.name,
         "fs_hz": fs,
         "n_ch": n_ch,
         "start_s": start,
@@ -452,6 +472,17 @@ def main() -> None:
         "steps": args.steps,
     }
 
+    seq_map = {
+        SEQ_PAN: "PAN_60S",
+        SEQ_ZOOM_IN: "ZOOM_IN",
+        SEQ_ZOOM_OUT: "ZOOM_OUT",
+        SEQ_PAN_ZOOM: "PAN_ZOOM",
+    }
+    if args.sequence == "ALL":
+        sequences = [seq_map[SEQ_PAN], seq_map[SEQ_ZOOM_IN], seq_map[SEQ_ZOOM_OUT], seq_map[SEQ_PAN_ZOOM]]
+    else:
+        sequences = [seq_map[args.sequence]]
+
     render_html(
         times=times,
         data=data,
@@ -459,6 +490,7 @@ def main() -> None:
         window_s=args.window_s,
         target_interval_ms=args.target_interval_ms,
         steps=args.steps,
+        sequences=sequences,
         out_path=out_html,
     )
     print(f"Wrote {out_html} (open in browser; console prints BENCH_JSON).")  # noqa: T201

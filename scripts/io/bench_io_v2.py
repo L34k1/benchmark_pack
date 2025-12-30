@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import argparse
 import math
 import time
@@ -7,6 +9,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
 from benchkit.lexicon import (
@@ -52,7 +58,10 @@ def _load_edf_mne(path: Path, start_s: float, dur_s: float, n_ch: int) -> float:
 def _load_edf_neo(path: Path, start_s: float, dur_s: float, n_ch: int) -> float:
     import neo
     t0 = _now_ms()
-    reader = neo.io.EdfIO(str(path))
+    reader_cls = getattr(neo.io, "EdfIO", None) or getattr(neo.io, "EDFIO", None)
+    if reader_cls is None:
+        raise AttributeError("neo.io.EdfIO/EDFIO not available in this Neo version.")
+    reader = reader_cls(str(path))
     seg = reader.read_segment(lazy=False)
     sigs = [asig for asig in seg.analogsignals]
     if not sigs:
@@ -150,6 +159,7 @@ def main() -> None:
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     p.add_argument("--nwb-dataset-path", type=str, default=None)
+    p.add_argument("--cache-state", choices=["CACHE_WARM", "CACHE_COLD"], default="CACHE_WARM")
 
     args = p.parse_args()
 
@@ -171,6 +181,7 @@ def main() -> None:
         "n_ch": int(args.n_ch),
         "n_files": int(args.n_files),
         "runs": int(args.runs),
+        "cache_state": args.cache_state,
     }
 
     for fmt in args.formats:

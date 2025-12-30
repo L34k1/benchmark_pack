@@ -19,39 +19,51 @@ Optional:
 """
 from __future__ import annotations
 
+import sys
+
 import argparse
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
-import pyedflib
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
-from benchkit.lexicon import BENCH_TFFR, FMT_EDF, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
+from benchkit.lexicon import BENCH_TFFR, FMT_EDF, FMT_NWB, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
+from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
 
-def load_edf_window(path: Path, n_channels: int, window_s: float, max_points_per_trace: int) -> Tuple[List[float], List[List[float]], float, int, int]:
-    f = pyedflib.EdfReader(str(path))
-    fs = float(f.getSampleFrequency(0))
-    n_available = int(f.signals_in_file)
-    n_channels = min(int(n_channels), n_available)
+def load_window(
+    path: Path,
+    fmt: str,
+    n_channels: int,
+    window_s: float,
+    max_points_per_trace: int,
+    nwb_series_path: str | None,
+    nwb_time_dim: str,
+) -> Tuple[List[float], List[List[float]], float, int, int]:
+    if fmt == FMT_EDF:
+        seg = load_edf_segment_pyedflib(path, 0.0, window_s, n_channels)
+    elif fmt == FMT_NWB:
+        seg = load_nwb_segment_pynwb(
+            path,
+            0.0,
+            window_s,
+            n_channels,
+            series_path=nwb_series_path,
+            time_dim=nwb_time_dim,
+        )
+    else:
+        raise ValueError(f"Unsupported format: {fmt}")
 
-    n_samples = min(int(window_s * fs), int(f.getNSamples()[0]))
-
-    # Uniform decimation to cap points per trace
-    decim = max(1, int(np.ceil(n_samples / max_points_per_trace)))
-    idx = np.arange(0, n_samples, decim, dtype=np.int64)
-
-    times = (idx / fs).astype(np.float64)
-
-    data: List[List[float]] = []
-    for ch in range(n_channels):
-        sig = f.readSignal(ch, start=0, n=n_samples).astype(np.float64)
-        data.append(sig[idx].tolist())
-    f.close()
-
-    return times.tolist(), data, fs, n_channels, decim
+    times, data, decim = decimate_for_display(seg.times_s, seg.data, max_points_per_trace)
+    times_list = times.astype(np.float64).tolist()
+    data_list = data.astype(np.float64).tolist()
+    return times_list, data_list, float(seg.fs_hz), int(data.shape[0]), int(decim)
 
 
 def write_html(out_html: Path, times: List[float], data: List[List[float]], meta: dict) -> None:
@@ -130,7 +142,8 @@ const config = {{
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
-    ap.add_argument("--edf", type=str, required=True, help="EDF filename inside --data-dir.")
+    ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], default=FMT_EDF)
+    ap.add_argument("--edf", type=str, required=True, help="EDF/NWB filename inside --data-dir.")
     ap.add_argument("--n-channels", type=int, default=8)
     ap.add_argument("--window-s", type=float, default=10.0)
     ap.add_argument("--max-points-per-trace", type=int, default=20000)
@@ -138,22 +151,32 @@ def main() -> None:
     ap.add_argument("--tag", type=str, default="edf_tffr")
     ap.add_argument("--overlay-state", type=str, default=OVL_OFF)
     ap.add_argument("--cache-state", type=str, default=CACHE_WARM)
+    ap.add_argument("--nwb-series-path", type=str, default=None)
+    ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
 
-    edf_path = args.data_dir / args.edf
-    if not edf_path.exists():
-        raise FileNotFoundError(edf_path)
+    data_path = args.data_dir / args.edf
+    if not data_path.exists():
+        raise FileNotFoundError(data_path)
 
     out_base = out_dir(args.out_root, BENCH_TFFR, TOOL_PLOTLY, args.tag)
-    write_manifest(out_base, BENCH_TFFR, TOOL_PLOTLY, vars(args), extra={"format": FMT_EDF})
+    write_manifest(out_base, BENCH_TFFR, TOOL_PLOTLY, vars(args), extra={"format": args.format})
     out_html = out_base / "plotly_tffr.html"
 
-    times, data, fs, n_ch, decim = load_edf_window(edf_path, args.n_channels, args.window_s, args.max_points_per_trace)
+    times, data, fs, n_ch, decim = load_window(
+        data_path,
+        args.format,
+        args.n_channels,
+        args.window_s,
+        args.max_points_per_trace,
+        args.nwb_series_path,
+        args.nwb_time_dim,
+    )
     meta = {
         "bench_id": BENCH_TFFR,
         "tool": TOOL_PLOTLY,
-        "format": FMT_EDF,
-        "file": edf_path.name,
+        "format": args.format,
+        "file": data_path.name,
         "fs_hz": fs,
         "n_channels": n_ch,
         "window_s": args.window_s,
