@@ -368,28 +368,15 @@ def run_interactions_one(
         issue_one(next_step["idx"])
         next_step["idx"] += 1
 
-    # Draw callback: match paints to pending commands
+    # Draw callback: treat the latest pending command as presented
     def on_draw() -> None:
         if not pending:
             return
 
-        xr = bench.get_xrange()
-        cur_x0, cur_x1 = float(xr[0]), float(xr[1])
-
-        # Find a pending command that matches the current range.
-        match_idx: Optional[int] = None
-        for j in range(len(pending) - 1, -1, -1):
-            cmd = pending[j]
-            if abs(cur_x0 - cmd.x0) <= eps and abs(cur_x1 - cmd.x1) <= eps:
-                match_idx = j
-                break
-        if match_idx is None:
-            return
-
-        # Mark earlier pending as dropped (A2) or ignore (A1 should not accumulate, but be safe)
-        dropped = pending[:match_idx]
-        matched = pending[match_idx]
-        after = pending[match_idx + 1 :]
+        # Treat all but the latest as dropped (A2) or ignored (A1).
+        dropped = pending[:-1]
+        matched = pending[-1]
+        after: List[Cmd] = []
 
         if bench_id == BENCH_A2 and dropped:
             for d in dropped:
