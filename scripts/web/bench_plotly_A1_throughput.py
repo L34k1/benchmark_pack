@@ -39,7 +39,17 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
-from benchkit.lexicon import BENCH_A1, FMT_EDF, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
+from benchkit.lexicon import (
+    BENCH_A1,
+    FMT_EDF,
+    OVL_OFF,
+    CACHE_WARM,
+    SEQ_PAN,
+    SEQ_PAN_ZOOM,
+    SEQ_ZOOM_IN,
+    SEQ_ZOOM_OUT,
+    TOOL_PLOTLY,
+)
 
 
 
@@ -155,6 +165,7 @@ def render_html(
     window_s: float,
     target_interval_ms: float,
     steps: int,
+    sequences: List[str],
     out_path: Path,
 ) -> None:
     # Keep layout minimal to reduce overhead.
@@ -348,7 +359,7 @@ async function main() {{
   const steps = {steps};
   const windowS = {window_s};
 
-  const sequences = ["PAN_60S", "ZOOM_IN", "ZOOM_OUT", "PAN_ZOOM"];
+  const sequences = {json.dumps(sequences)};
   const results = [];
 
   for (const seq of sequences) {{
@@ -411,6 +422,11 @@ def main() -> None:
     ap.add_argument("--tag", type=str, default="edf_A1")
     ap.add_argument("--overlay-state", type=str, default=OVL_OFF)
     ap.add_argument("--cache-state", type=str, default=CACHE_WARM)
+    ap.add_argument(
+        "--sequence",
+        choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM, "ALL"],
+        default="ALL",
+    )
 
     args = ap.parse_args()
 
@@ -450,6 +466,17 @@ def main() -> None:
         "steps": args.steps,
     }
 
+    seq_map = {
+        SEQ_PAN: "PAN_60S",
+        SEQ_ZOOM_IN: "ZOOM_IN",
+        SEQ_ZOOM_OUT: "ZOOM_OUT",
+        SEQ_PAN_ZOOM: "PAN_ZOOM",
+    }
+    if args.sequence == "ALL":
+        sequences = [seq_map[SEQ_PAN], seq_map[SEQ_ZOOM_IN], seq_map[SEQ_ZOOM_OUT], seq_map[SEQ_PAN_ZOOM]]
+    else:
+        sequences = [seq_map[args.sequence]]
+
     render_html(
         times=times,
         data=data,
@@ -457,6 +484,7 @@ def main() -> None:
         window_s=args.window_s,
         target_interval_ms=args.target_interval_ms,
         steps=args.steps,
+        sequences=sequences,
         out_path=out_html,
     )
     print(f"Wrote {out_html} (open in browser; console prints BENCH_JSON).")  # noqa: T201
