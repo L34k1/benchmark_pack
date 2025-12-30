@@ -23,9 +23,15 @@ def out_dir(out_root: Path, bench_id: str, tool_id: str, tag: str) -> Path:
     return ensure_dir(out_root / bench_id / tool_id / tag)
 
 
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, Path):
+        return str(obj)
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
 def write_json(path: Path, obj: Any) -> None:
     ensure_dir(path.parent)
-    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False, default=_json_default), encoding="utf-8")
 
 
 def env_info() -> Dict[str, Any]:
