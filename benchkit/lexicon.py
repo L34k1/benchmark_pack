@@ -35,6 +35,10 @@ TOOL_IO_H5PY     = "IO_H5PY"
 TOOL_PG     = "VIS_PYQTGRAPH"
 TOOL_PLOTLY = "VIS_PLOTLY"
 
+# Additional visualization tools
+TOOL_VISPY = "VIS_VISPY"
+TOOL_D3 = "VIS_D3_CANVAS"
+
 # Interaction sequences
 SEQ_PAN      = "PAN"
 SEQ_ZOOM_IN  = "ZOOM_IN"

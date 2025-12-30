@@ -23,6 +23,8 @@ Then open plotly_interactions.html and read the console output:
 
 from __future__ import annotations
 
+import sys
+
 import argparse
 import json
 import math
@@ -31,6 +33,10 @@ from typing import List, Tuple
 
 import numpy as np
 import pyedflib
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
 from benchkit.lexicon import BENCH_A1, FMT_EDF, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
