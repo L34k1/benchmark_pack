@@ -52,7 +52,10 @@ def _load_edf_mne(path: Path, start_s: float, dur_s: float, n_ch: int) -> float:
 def _load_edf_neo(path: Path, start_s: float, dur_s: float, n_ch: int) -> float:
     import neo
     t0 = _now_ms()
-    reader = neo.io.EdfIO(str(path))
+    reader_cls = getattr(neo.io, "EdfIO", None) or getattr(neo.io, "EDFIO", None)
+    if reader_cls is None:
+        raise AttributeError("neo.io.EdfIO/EDFIO not available in this Neo version.")
+    reader = reader_cls(str(path))
     seg = reader.read_segment(lazy=False)
     sigs = [asig for asig in seg.analogsignals]
     if not sigs:
