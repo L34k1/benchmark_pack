@@ -425,31 +425,45 @@ def run_interactions_one(
 
     bench.set_draw_callback(on_draw)
 
-    # Warmup: wait for first draw so exposure/layout doesn’t pollute measurement
-    warm_t0 = time.perf_counter()
-    while bench.tffr_s is None and (time.perf_counter() - warm_t0) < float(args.hard_timeout_s):
-        visapp.process_events()
-
-    # Issue according to bench mode
-    if bench_id == BENCH_A1:
-        next_step["idx"] = 0
-        issue_one(0)
-        next_step["idx"] = 1
-    else:
-        # A2: start timer
-        next_step["idx"] = 0
-        from vispy import app as _app
-
-        timer["obj"] = _app.Timer(interval=interval_s, connect=on_timer, start=True)
-
-    # Run loop until done or timeout
+    # Drive the event loop with timers so updates run even when the window has focus.
     hard_timeout = float(args.hard_timeout_s)
-    t0 = time.perf_counter()
-    while not done["flag"] and (time.perf_counter() - t0) < hard_timeout:
-        visapp.process_events()
+    loop_start = time.perf_counter()
+    started = {"flag": False}
 
-    bench.close()
-    visapp.process_events()
+    def pump(ev=None) -> None:
+        if done["flag"]:
+            if timer["obj"] is not None:
+                timer["obj"].stop()
+            bench.close()
+            visapp.quit()
+            return
+
+        if (time.perf_counter() - loop_start) > hard_timeout:
+            done["flag"] = True
+            if timer["obj"] is not None:
+                timer["obj"].stop()
+            bench.close()
+            visapp.quit()
+            return
+
+        # Wait for the first draw before issuing commands.
+        if bench.tffr_s is None:
+            return
+
+        if started["flag"]:
+            return
+        started["flag"] = True
+
+        if bench_id == BENCH_A1:
+            next_step["idx"] = 0
+            issue_one(0)
+            next_step["idx"] = 1
+        else:
+            next_step["idx"] = 0
+            timer["obj"] = visapp.Timer(interval=interval_s, connect=on_timer, start=True)
+
+    pump_timer = visapp.Timer(interval=0.01, connect=pump, start=True)
+    visapp.run()
 
     # Build rows, including metadata
     rows: List[Dict[str, Any]] = []
