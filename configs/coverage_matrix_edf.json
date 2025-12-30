@@ -1,0 +1,26 @@
+{
+  "format": "EDF",
+  "windows_s": [
+    60,
+    600,
+    1800
+  ],
+  "channels": [
+    8,
+    16,
+    32,
+    64
+  ],
+  "sequences": [
+    "PAN",
+    "ZOOM_IN",
+    "ZOOM_OUT",
+    "PAN_ZOOM"
+  ],
+  "cadence_ms": [
+    16,
+    33,
+    50
+  ],
+  "notes": "Use as a planning matrix for coverage (not consumed by scripts by default)."
+}
