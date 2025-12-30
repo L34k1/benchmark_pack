@@ -101,53 +101,6 @@ def load_segment(
         int(decim),
     )
 
-        n_avail = n_min_total - start_samp
-        if n_avail <= 1:
-            raise ValueError(
-                f"Requested start={start:.6f}s (sample {start_samp}) leaves no data. "
-                f"total_dur={total_dur:.3f}s, n_min_total={n_min_total}, fs0={fs0}"
-            )
-
-        max_dur = n_avail / fs0
-        dur = min(float(load_duration_s), max_dur)
-
-        n_samples = min(int(math.floor(dur * fs0)), n_avail)
-        if n_samples <= 1:
-            raise ValueError(
-                f"Computed n_samples={n_samples} (dur={dur:.6f}s) is too small. "
-                f"start={start:.6f}s, total_dur={total_dur:.3f}s"
-            )
-
-        data_np = np.zeros((len(cand), n_samples), dtype=np.float32)
-        for out_ch, ch in enumerate(cand):
-            sig = np.asarray(f.readSignal(ch, start_samp, n_samples), dtype=np.float32)
-            if sig.size == 0:
-                raise ValueError(
-                    f"readSignal returned 0 samples for ch={ch} label='{labels[ch]}' "
-                    f"(start_samp={start_samp}, n_samples={n_samples})."
-                )
-            if sig.size < n_samples:
-                sig = np.pad(sig, (0, n_samples - sig.size), mode="edge")
-
-            # normalize (not part of interaction timing)
-            sig = sig - float(sig.mean())
-            sd = float(sig.std()) or 1.0
-            sig = sig / sd
-            data_np[out_ch, :] = sig
-
-    times_np = (np.arange(n_samples, dtype=np.float32) / fs0) + float(start)
-
-    # Decimate to keep HTML size reasonable.
-    decim = 1
-    if max_points_per_trace and max_points_per_trace > 0 and times_np.size > max_points_per_trace:
-        decim = int(math.ceil(times_np.size / max_points_per_trace))
-        times_np = times_np[::decim]
-        data_np = data_np[:, ::decim]
-
-    times = times_np.astype(float).tolist()
-    data = [data_np[i, :].astype(float).tolist() for i in range(data_np.shape[0])]
-    return times, data, fs0, int(data_np.shape[0]), float(start), float(dur), int(decim)
-
 
 def render_html(
     *,
