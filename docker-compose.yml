@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - DATA_DIR=/data
+      - ZAP_CONTAINER=zap
+      - DOCKER_CMD=docker
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+    depends_on:
+      - zap
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+  zap:
+    image: owasp/zap2docker-stable
+    container_name: zap
+    command: ["/bin/sh", "-c", "sleep infinity"]
+    volumes:
+      - ./data:/data
+

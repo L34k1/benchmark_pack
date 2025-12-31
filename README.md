@@ -1,56 +1,52 @@
-# benchmark_pack
+# Web Security Scan (Passive) MVP
 
-A minimal, reproducible folder structure for EEG benchmarking scripts with consistent outputs.
+Minimal MVP for a passive web security scan pipeline using OWASP ZAP Baseline + lightweight probes.
 
-## Preconditions
+## Prerequisites
 
-- Put EDF files under `./data/` (this pack does not ship data).
-- Run commands from the project root (so `benchkit` imports resolve).
+- Docker + Docker Compose
+- Authorized target URL (HTTP/HTTPS)
 
-## Quick commands
+## Quick start
 
-### IO (EDF)
 ```bash
-python -m scripts.io.bench_io --data-dir data --n-files 5 --runs 5 --windows 60,600,1800 --n-channels 64 --tag edf_io
+docker compose up --build
 ```
 
-### PyQtGraph — TFFR
-```bash
-python -m scripts.desktop.bench_pyqtgraph_tffr --data-dir data --n-files 5 --runs 3 --window-s 10 --n-channels 64 --tag edf_tffr
+- API: http://localhost:8000
+- Frontend: http://localhost:5173
+
+## Example run
+
+1. Open the frontend UI.
+2. Enter a target URL such as `https://example.com`.
+3. Click **Lancer le scan**.
+4. Monitor status and download the HTML report.
+
+Artifacts for a run are stored under:
+
+```
+/data/runs/{run_id}/merged_findings.json
+/data/runs/{run_id}/report.html
+/data/runs/{run_id}/zap/
 ```
 
-### PyQtGraph — A1 throughput-only
-```bash
-python -m scripts.desktop.bench_pyqtgraph_A1_throughput --data-dir data --n-files 5 --runs 3 --window-s 60 --n-channels 64 --tag edf_A1
-```
+## API
 
-### PyQtGraph — A2 cadenced
-```bash
-python -m scripts.desktop.bench_pyqtgraph_A2_cadenced --data-dir data --n-files 5 --runs 3 --window-s 60 --n-channels 64 --target-interval-ms 16 --tag edf_A2
-```
+- `POST /runs` Body: `{ "target_url": "https://example.com", "max_duration_sec": 300 }`
+- `GET /runs/{run_id}` Status and progress
+- `GET /runs/{run_id}/findings` Normalized findings
+- `GET /runs/{run_id}/report.html` Downloadable HTML report
 
-### Plotly — A1/A2 (HTML generators)
-```bash
-python -m scripts.web.bench_plotly_A1_throughput --data-dir data --edf your_file.edf --window-s 60 --n-channels 64 --tag edf_A1
-python -m scripts.web.bench_plotly_A2_cadenced    --data-dir data --edf your_file.edf --window-s 60 --n-channels 64 --target-interval-ms 16 --tag edf_A2
-```
+Status values: `queued | running | finished | failed`
 
-Open the generated HTML and copy the `BENCH_JSON` line from the browser console.
+## Security and limitations
 
-Optional headless capture (requires Playwright):
-```bash
-python -m scripts.web.collect_plotly_console_playwright --html outputs/A2_CADENCED/VIS_PLOTLY/edf_A2/plotly_A2_interactions.html
-```
+- Passive scans only, no destructive tests
+- ZAP Baseline uses passive analysis
+- Timeouts and max duration enforced per run
+- Light probes only (TLS and header/cookie checks)
 
-## Output locations
+## Legal disclaimer
 
-All outputs are written under `./outputs/<BENCH_ID>/<TOOL_ID>/<TAG>/`.
-
-Each run writes a `manifest.json` to record arguments and environment metadata.
-
-## Lexicon and status
-
-See:
-- `docs/LEXICON.md`
-- `docs/STATUS.md`
-- `docs/ARCHITECTURE.md`
+Use this tool **only** against targets you own or have explicit permission to test. This project is intended for authorized security assessments and training. Unauthorized scanning may be illegal.
