@@ -120,7 +120,7 @@ class DatovizBench:
         import datoviz as dv
 
         self.dv = dv
-        self.canvas = dv.canvas(show=False, size=(width, height))
+        self.canvas = self._make_canvas(width, height)
         self.panel = self.canvas.panel()
 
         self._n_ch = int(data.shape[0])
@@ -149,6 +149,23 @@ class DatovizBench:
                 self._first_draw_s = time.perf_counter()
             if self._draw_cb is not None:
                 self._draw_cb()
+
+    def _make_canvas(self, width: int, height: int):
+        if hasattr(self.dv, "canvas"):
+            return self.dv.canvas(show=False, size=(width, height))
+        try:
+            from datoviz import canvas as dv_canvas  # type: ignore[import-not-found]
+
+            return dv_canvas(show=False, size=(width, height))
+        except Exception:
+            pass
+        if hasattr(self.dv, "app"):
+            app = self.dv.app()
+            if hasattr(app, "canvas"):
+                return app.canvas(show=False, size=(width, height))
+        if hasattr(self.dv, "Canvas"):
+            return self.dv.Canvas(show=False, size=(width, height))
+        raise RuntimeError("Datoviz canvas API not found. Install a datoviz build that exposes canvas().")
 
     def show_and_start(self) -> None:
         self.canvas.show()

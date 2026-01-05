@@ -16,6 +16,8 @@ Replace the placeholders once (Ctrl+H):
 - `__REPO__` → full path to the repo root (if you want to paste from anywhere)
 - `__TAG__` → run label (keeps outputs separate)
 
+> ⚠️ The block below must be pasted into **PowerShell**, not `cmd.exe`.
+
 ```powershell
 cd "__REPO__"
 python -m venv .venv
@@ -51,6 +53,48 @@ foreach ($w in $WINDOWS) {
     python scripts\web\gen_d3_html.py --bench-id A2_CADENCED --format EDF --file "$FILE" --tag $TAG --window-s $w --load-duration-s $w --n-ch $ch --target-interval-ms 16
   }
 }
+```
+
+## Quick setup (Windows cmd.exe copy/paste)
+
+Replace the placeholders once (Ctrl+H):
+- `__DATA_FILE__` → full path to your EDF/NWB file
+- `__REPO__` → full path to the repo root (if you want to paste from anywhere)
+- `__TAG__` → run label (keeps outputs separate)
+
+```bat
+cd "__REPO__"
+python -m venv .venv
+call .\.venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r scripts\desktop\requirements-desktop.txt
+
+set FILE=__DATA_FILE__
+set TAG=__TAG__
+
+for %%w in (60 600 1800) do (
+  for %%c in (8 16 32 64) do (
+    rem VisPy: TFFR, A1, A2
+    python scripts\desktop\bench_vispy.py --bench-id TFFR --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\desktop\bench_vispy.py --bench-id A1_THROUGHPUT --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\desktop\bench_vispy.py --bench-id A2_CADENCED --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+
+    rem Datoviz: TFFR, A1, A2
+    python scripts\desktop\bench_datoviz.py --bench-id TFFR --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\desktop\bench_datoviz.py --bench-id A1_THROUGHPUT --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\desktop\bench_datoviz.py --bench-id A2_CADENCED --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+
+    rem PyQtGraph: TFFR, A1, A2
+    python scripts\desktop\bench_pyqtgraph_tffr_v2.py --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\desktop\bench_pyqtgraph_A2_cadenced_v2.py --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+
+    rem D3.js (HTML generator)
+    python scripts\web\gen_d3_html.py --bench-id TFFR --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\web\gen_d3_html.py --bench-id A1_THROUGHPUT --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c
+    python scripts\web\gen_d3_html.py --bench-id A2_CADENCED --format EDF --file "%FILE%" --tag %TAG% --window-s %%w --load-duration-s %%w --n-ch %%c --target-interval-ms 16
+  )
+)
 ```
 
 ### IO (EDF)
