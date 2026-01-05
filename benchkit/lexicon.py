@@ -38,6 +38,7 @@ TOOL_PLOTLY = "VIS_PLOTLY"
 # Additional visualization tools
 TOOL_VISPY = "VIS_VISPY"
 TOOL_D3 = "VIS_D3_CANVAS"
+TOOL_DATOVIZ = "VIS_DATOVIZ"
 
 # Interaction sequences
 SEQ_PAN      = "PAN"
