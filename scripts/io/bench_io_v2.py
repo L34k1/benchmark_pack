@@ -159,6 +159,7 @@ def main() -> None:
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     p.add_argument("--nwb-dataset-path", type=str, default=None)
+    p.add_argument("--cache-state", choices=["CACHE_WARM", "CACHE_COLD"], default="CACHE_WARM")
 
     args = p.parse_args()
 
@@ -180,6 +181,7 @@ def main() -> None:
         "n_ch": int(args.n_ch),
         "n_files": int(args.n_files),
         "runs": int(args.runs),
+        "cache_state": args.cache_state,
     }
 
     for fmt in args.formats:
