@@ -32,6 +32,7 @@ from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, lo
 
 
 D3_CDN = "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"
+D3_CDN_MODULE = "https://cdn.jsdelivr.net/npm/d3@7/+esm"
 
 
 def clamp_range(x0: float, x1: float, lo: float, hi: float) -> Tuple[float, float]:
@@ -102,15 +103,24 @@ def load_segment(args: argparse.Namespace) -> Tuple[np.ndarray, np.ndarray, Dict
     return t.astype(np.float32), d.astype(np.float32), meta
 
 
-def make_html(payload: Dict[str, Any]) -> str:
+def make_html(payload: Dict[str, Any], use_module: bool) -> str:
     js_payload = json.dumps(payload)
+
+    d3_head = f'<script src="{D3_CDN}"></script>'
+    script_open = "<script>"
+    script_close = "</script>"
+    d3_import = ""
+    if use_module:
+        d3_head = ""
+        script_open = '<script type="module">'
+        d3_import = f'import * as d3 from "{D3_CDN_MODULE}";'
 
     return f"""<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>D3 Benchmark</title>
-  <script src="{D3_CDN}"></script>
+  {d3_head}
   <style>
     html, body {{ height: 100%; margin: 0; }}
     #root {{ width: 100%; height: 100%; display: flex; }}
@@ -119,7 +129,8 @@ def make_html(payload: Dict[str, Any]) -> str:
 </head>
 <body>
 <div id="root"><canvas id="c"></canvas></div>
-<script>
+{script_open}
+{d3_import}
 const PAYLOAD = {js_payload};
 
 function nowMs() {{ return performance.now(); }}
@@ -302,7 +313,7 @@ async function run() {{
 }}
 
 run().catch(e => console.error('BENCH_ERROR', e));
-</script>
+{script_close}
 </body>
 </html>
 """
@@ -329,6 +340,7 @@ def main() -> None:
 
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
+    p.add_argument("--d3-module", action="store_true", help="Use ESM module import for D3.js")
     args = p.parse_args()
 
     out = out_dir(args.out_root, args.bench_id, TOOL_D3, args.tag)
@@ -361,7 +373,7 @@ def main() -> None:
     if args.bench_id in (BENCH_A1, BENCH_A2):
         payload["ranges"] = [list(r) for r in build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))]
 
-    html = make_html(payload)
+    html = make_html(payload, use_module=bool(args.d3_module))
     html_path = out / "d3_bench.html"
     html_path.write_text(html, encoding="utf-8")
     write_json(out / "html_manifest.json", {"html": str(html_path)})
