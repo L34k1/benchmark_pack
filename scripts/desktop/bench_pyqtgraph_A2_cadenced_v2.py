@@ -115,6 +115,13 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
     return rng
 
 
+def _range_close(a: Tuple[float, float], b: Tuple[float, float], rel: float = 1e-6) -> bool:
+    wa = abs(a[1] - a[0])
+    wb = abs(b[1] - b[0])
+    scale = max(wa, wb, 1.0)
+    return abs(a[0] - b[0]) <= rel * scale and abs(a[1] - b[1]) <= rel * scale
+
+
 def _log(msg: str) -> None:
     stamp = time.strftime("%H:%M:%S")
     print(f"[{stamp}] {msg}", flush=True)
@@ -177,6 +184,7 @@ def main() -> None:
     plot.setWindowTitle("PyQtGraph A2")
     plot.setBackground("w")
     plot.show()
+    view_box = plot.getViewBox()
 
     _log("phase=plot_init")
     offsets = np.arange(d.shape[0], dtype=np.float32)[:, None]
@@ -197,9 +205,21 @@ def main() -> None:
     step_deadline_ms = float("nan")
     base_start_ms = _now_ms()
     interval = float(args.target_interval_ms)
+    expected_range: Tuple[float, float] = (float("nan"), float("nan"))
+    range_updated = False
     failed = False
     exit_code = 0
     start_ms = _now_ms()
+
+    def on_range_changed(_view_box, ranges) -> None:
+        nonlocal range_updated
+        if expected_range[0] != expected_range[0]:
+            return
+        x0, x1 = float(ranges[0][0]), float(ranges[0][1])
+        if _range_close((x0, x1), expected_range):
+            range_updated = True
+
+    view_box.sigRangeChanged.connect(on_range_changed)
 
     def finalize() -> None:
         _log("phase=finalize_start")
@@ -251,7 +271,7 @@ def main() -> None:
         nonlocal step_idx, prev_paints
         if failed:
             return
-        if plot.paint_count > prev_paints:
+        if plot.paint_count > prev_paints or range_updated:
             end_paint = plot.last_paint_ms
             prev_paints = plot.paint_count
             finish = float(end_paint) if np.isfinite(end_paint) else _now_ms()
@@ -266,7 +286,7 @@ def main() -> None:
         QtCore.QTimer.singleShot(1, lambda: check_paint(scheduled_ms))
 
     def run_step() -> None:
-        nonlocal step_idx, step_start_ms, step_deadline_ms
+        nonlocal step_idx, step_start_ms, step_deadline_ms, expected_range, range_updated
         if failed:
             return
         if step_idx >= len(ranges):
@@ -280,9 +300,12 @@ def main() -> None:
             return
         x0, x1 = ranges[step_idx]
         _log(f"phase=step idx={step_idx} x0={x0:.6f} x1={x1:.6f}")
+        range_updated = False
+        expected_range = (x0, x1)
         step_start_ms = _now_ms()
         step_deadline_ms = step_start_ms + float(args.step_timeout_ms)
         plot.setXRange(x0, x1, padding=0.0)
+        plot.repaint()
         check_paint(scheduled_ms)
 
     def heartbeat() -> None:
