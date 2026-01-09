@@ -114,7 +114,7 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
     return rng
 
 
-def wait_next_paint(app: QtWidgets.QApplication, plot: _Plot, prev_count: int, timeout_ms: int = 2000) -> float:
+def wait_next_paint(app: QtWidgets.QApplication, plot: _Plot, prev_count: int, timeout_ms: int = 250) -> float:
     t0 = _now_ms()
     while plot.paint_count <= prev_count and (_now_ms() - t0) < timeout_ms:
         app.processEvents(QtCore.QEventLoop.AllEvents, 1)
@@ -142,6 +142,7 @@ def main() -> None:
 
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
+    p.add_argument("--paint-timeout-ms", type=int, default=250)
     args = p.parse_args()
 
     out = out_dir(args.out_root, BENCH_A2, TOOL_PG, args.tag)
@@ -164,7 +165,7 @@ def main() -> None:
         _add_overlay(plot, t)
 
     prev = plot.paint_count
-    wait_next_paint(app, plot, prev)
+    wait_next_paint(app, plot, prev, int(args.paint_timeout_ms))
 
     lo, hi = float(t[0]), float(t[-1])
     ranges = build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))
@@ -190,7 +191,7 @@ def main() -> None:
 
         start = _now_ms()
         plot.setXRange(x0, x1, padding=0.0)
-        end_paint = wait_next_paint(app, plot, prev_paints)
+        end_paint = wait_next_paint(app, plot, prev_paints, int(args.paint_timeout_ms))
         prev_paints = plot.paint_count
 
         finish = float(end_paint) if np.isfinite(end_paint) else _now_ms()
