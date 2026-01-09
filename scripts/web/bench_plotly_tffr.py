@@ -143,19 +143,22 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
     ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], default=FMT_EDF)
-    ap.add_argument("--edf", type=str, required=True, help="EDF/NWB filename inside --data-dir.")
-    ap.add_argument("--n-channels", type=int, default=8)
+    ap.add_argument("--edf", type=str, default=None, help="EDF/NWB filename inside --data-dir.")
+    ap.add_argument("--file", type=Path, default=None, help="Full path to EDF/NWB file.")
+    ap.add_argument("--n-channels", "--n-ch", dest="n_channels", type=int, default=8)
     ap.add_argument("--window-s", type=float, default=10.0)
     ap.add_argument("--max-points-per-trace", type=int, default=20000)
     ap.add_argument("--out-root", type=Path, default=Path("outputs"))
     ap.add_argument("--tag", type=str, default="edf_tffr")
-    ap.add_argument("--overlay-state", type=str, default=OVL_OFF)
+    ap.add_argument("--overlay-state", "--overlay", dest="overlay_state", type=str, default=OVL_OFF)
     ap.add_argument("--cache-state", type=str, default=CACHE_WARM)
     ap.add_argument("--nwb-series-path", type=str, default=None)
     ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
 
-    data_path = args.data_dir / args.edf
+    data_path = args.file or (args.data_dir / args.edf if args.edf else None)
+    if data_path is None:
+        raise SystemExit("Provide --file or --edf with --data-dir.")
     if not data_path.exists():
         raise FileNotFoundError(data_path)
 
@@ -179,6 +182,7 @@ def main() -> None:
         "file": data_path.name,
         "fs_hz": fs,
         "n_channels": n_ch,
+        "effective_n_ch": n_ch,
         "window_s": args.window_s,
         "decim_factor": decim,
         "n_points_per_trace": len(times),
