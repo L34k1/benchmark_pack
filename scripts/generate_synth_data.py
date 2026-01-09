@@ -56,7 +56,7 @@ def write_edf(path: Path, data: np.ndarray, fs_hz: float) -> None:
             {
                 "label": label,
                 "dimension": "uV",
-                "sample_rate": float(fs_hz),
+                "sample_frequency": float(fs_hz),
                 "physical_min": physical_min,
                 "physical_max": physical_max,
                 "digital_min": -32768,
