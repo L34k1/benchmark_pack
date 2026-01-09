@@ -136,6 +136,25 @@ All outputs are written under `./outputs/<BENCH_ID>/<TOOL_ID>/<TAG>/`.
 
 Each run writes a `manifest.json` to record arguments and environment metadata.
 
+## Synthetic benchmark datasets
+
+Some EDF/NWB files ship with fewer than 64 channels, which can make `--n-ch 64` misleading if the loader caps to the available channels. Use the manual generator to create deterministic synthetic datasets with ≥64 channels and a full 30-minute duration.
+
+Generate datasets (manual only; nothing auto-generates):
+
+```bash
+python scripts/generate_synth_data.py --n-ch 64 --duration-s 1800 --fs-hz 250
+```
+
+This creates:
+
+- `data/synth_64ch_1800s_<fs>hz.edf`
+- `data/synth_64ch_1800s_<fs>hz.nwb`
+
+Recommended `--fs-hz` defaults:
+- 250 Hz keeps file sizes reasonable for 64 channels × 30 minutes.
+- Higher sampling rates scale file size and generation time linearly.
+
 ## Lexicon and status
 
 See:
