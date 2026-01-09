@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 import argparse
+import csv
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -195,6 +196,13 @@ def main() -> None:
         finish = float(end_paint) if np.isfinite(end_paint) else _now_ms()
         lat_ms.append(float(finish - start))
         lateness_ms.append(float(finish - scheduled))
+
+    steps_csv = out / "steps.csv"
+    with steps_csv.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["step_id", "latency_ms", "lateness_ms"])
+        for i, (lat, late) in enumerate(zip(lat_ms, lateness_ms)):
+            w.writerow([i, f"{lat:.3f}", f"{late:.3f}"])
 
     arr = np.asarray(lateness_ms, dtype=float)
     summary = summarize_latency_ms(lat_ms)
