@@ -399,6 +399,7 @@ def main() -> None:
         "edf": data_path.name,
         "fs_hz": fs,
         "n_ch": n_ch,
+        "effective_n_ch": n_ch,
         "start_s": start,
         "dur_s": dur,
         "decim_factor": decim,

@@ -182,6 +182,7 @@ def main() -> None:
         "file": data_path.name,
         "fs_hz": fs,
         "n_channels": n_ch,
+        "effective_n_ch": n_ch,
         "window_s": args.window_s,
         "decim_factor": decim,
         "n_points_per_trace": len(times),
