@@ -143,6 +143,7 @@ def main() -> None:
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     p.add_argument("--paint-timeout-ms", type=int, default=250)
+    p.add_argument("--step-delay-ms", type=int, default=0)
     args = p.parse_args()
 
     out = out_dir(args.out_root, BENCH_A2, TOOL_PG, args.tag)
@@ -164,65 +165,88 @@ def main() -> None:
     if args.overlay == OVL_ON:
         _add_overlay(plot, t)
 
-    prev = plot.paint_count
-    wait_next_paint(app, plot, prev, int(args.paint_timeout_ms))
-
     lo, hi = float(t[0]), float(t[-1])
     ranges = build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))
 
     lat_ms: List[float] = []
     lateness_ms: List[float] = []
-
-    t0 = _now_ms()
-    interval = float(args.target_interval_ms)
     prev_paints = plot.paint_count
+    step_idx = 0
+    step_start_ms = float("nan")
+    step_deadline_ms = float("nan")
+    base_start_ms = _now_ms()
+    interval = float(args.target_interval_ms)
 
-    for i, (x0, x1) in enumerate(ranges):
-        scheduled = t0 + i * interval
+    def finalize() -> None:
+        steps_csv = out / "steps.csv"
+        with steps_csv.open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["step_id", "latency_ms", "lateness_ms"])
+            for i, (lat, late) in enumerate(zip(lat_ms, lateness_ms)):
+                w.writerow([i, f"{lat:.3f}", f"{late:.3f}"])
 
-        while True:
-            now = _now_ms()
-            if now >= scheduled:
-                break
-            remaining = scheduled - now
-            if remaining > 2.0:
-                time.sleep((remaining - 1.0) / 1000.0)
-            app.processEvents(QtCore.QEventLoop.AllEvents, 1)
+        arr = np.asarray(lateness_ms, dtype=float)
+        summary = summarize_latency_ms(lat_ms)
+        summary.update({
+            "bench_id": BENCH_A2,
+            "tool_id": TOOL_PG,
+            "format": args.format,
+            "sequence": args.sequence,
+            "overlay": args.overlay,
+            "window_s": float(args.window_s),
+            "steps": int(args.steps),
+            "target_interval_ms": float(args.target_interval_ms),
+            "lateness_p50_ms": float(np.percentile(arr, 50)),
+            "lateness_p95_ms": float(np.percentile(arr, 95)),
+            "lateness_max_ms": float(np.max(arr)),
+            "meta": meta,
+        })
+        write_json(out / "summary.json", summary)
+        write_json(out / "latencies_ms.json", {"lat_ms": lat_ms, "lateness_ms": lateness_ms})
 
-        start = _now_ms()
+    def schedule_next(delay_ms: float = 0.0) -> None:
+        QtCore.QTimer.singleShot(int(max(0, delay_ms)), run_step)
+
+    def check_paint(scheduled_ms: float) -> None:
+        nonlocal step_idx, prev_paints
+        if plot.paint_count > prev_paints:
+            end_paint = plot.last_paint_ms
+            prev_paints = plot.paint_count
+            finish = float(end_paint) if np.isfinite(end_paint) else _now_ms()
+            lat_ms.append(float(finish - step_start_ms))
+            lateness_ms.append(float(finish - scheduled_ms))
+            step_idx += 1
+            schedule_next(float(args.step_delay_ms))
+            return
+        if _now_ms() >= step_deadline_ms:
+            finish = _now_ms()
+            lat_ms.append(float(finish - step_start_ms))
+            lateness_ms.append(float(finish - scheduled_ms))
+            step_idx += 1
+            schedule_next(float(args.step_delay_ms))
+            return
+        QtCore.QTimer.singleShot(1, lambda: check_paint(scheduled_ms))
+
+    def run_step() -> None:
+        nonlocal step_idx, step_start_ms, step_deadline_ms
+        if step_idx >= len(ranges):
+            finalize()
+            app.quit()
+            return
+        scheduled_ms = base_start_ms + step_idx * interval
+        now_ms = _now_ms()
+        if now_ms < scheduled_ms:
+            schedule_next(scheduled_ms - now_ms)
+            return
+        x0, x1 = ranges[step_idx]
+        step_start_ms = _now_ms()
+        step_deadline_ms = step_start_ms + float(args.paint_timeout_ms)
         plot.setXRange(x0, x1, padding=0.0)
-        end_paint = wait_next_paint(app, plot, prev_paints, int(args.paint_timeout_ms))
-        prev_paints = plot.paint_count
+        check_paint(scheduled_ms)
 
-        finish = float(end_paint) if np.isfinite(end_paint) else _now_ms()
-        lat_ms.append(float(finish - start))
-        lateness_ms.append(float(finish - scheduled))
-
-    steps_csv = out / "steps.csv"
-    with steps_csv.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["step_id", "latency_ms", "lateness_ms"])
-        for i, (lat, late) in enumerate(zip(lat_ms, lateness_ms)):
-            w.writerow([i, f"{lat:.3f}", f"{late:.3f}"])
-
-    arr = np.asarray(lateness_ms, dtype=float)
-    summary = summarize_latency_ms(lat_ms)
-    summary.update({
-        "bench_id": BENCH_A2,
-        "tool_id": TOOL_PG,
-        "format": args.format,
-        "sequence": args.sequence,
-        "overlay": args.overlay,
-        "window_s": float(args.window_s),
-        "steps": int(args.steps),
-        "target_interval_ms": float(args.target_interval_ms),
-        "lateness_p50_ms": float(np.percentile(arr, 50)),
-        "lateness_p95_ms": float(np.percentile(arr, 95)),
-        "lateness_max_ms": float(np.max(arr)),
-        "meta": meta,
-    })
-    write_json(out / "summary.json", summary)
-    write_json(out / "latencies_ms.json", {"lat_ms": lat_ms, "lateness_ms": lateness_ms})
+    schedule_next(0.0)
+    app.exec_()
+    return
 
 
 if __name__ == "__main__":
