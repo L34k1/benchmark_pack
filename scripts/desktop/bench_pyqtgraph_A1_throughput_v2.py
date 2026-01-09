@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 import argparse
+import csv
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -113,7 +114,7 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
     return rng
 
 
-def wait_next_paint(app: QtWidgets.QApplication, plot: _Plot, prev_count: int, timeout_ms: int = 2000) -> float:
+def wait_next_paint(app: QtWidgets.QApplication, plot: _Plot, prev_count: int, timeout_ms: int = 250) -> float:
     t0 = _now_ms()
     while plot.paint_count <= prev_count and (_now_ms() - t0) < timeout_ms:
         app.processEvents(QtCore.QEventLoop.AllEvents, 1)
@@ -140,6 +141,8 @@ def main() -> None:
 
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
+    p.add_argument("--paint-timeout-ms", type=int, default=250)
+    p.add_argument("--step-delay-ms", type=int, default=0)
     args = p.parse_args()
 
     out = out_dir(args.out_root, BENCH_A1, TOOL_PG, args.tag)
@@ -161,35 +164,72 @@ def main() -> None:
     if args.overlay == OVL_ON:
         _add_overlay(plot, t)
 
-    prev = plot.paint_count
-    wait_next_paint(app, plot, prev)
-
     lo, hi = float(t[0]), float(t[-1])
     ranges = build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))
 
     lat_ms: List[float] = []
     prev_paints = plot.paint_count
+    step_idx = 0
+    step_start_ms = float("nan")
+    step_deadline_ms = float("nan")
 
-    for x0, x1 in ranges:
-        start = _now_ms()
+    def finalize() -> None:
+        steps_csv = out / "steps.csv"
+        with steps_csv.open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["step_id", "latency_ms"])
+            for i, lat in enumerate(lat_ms):
+                w.writerow([i, f"{lat:.3f}"])
+
+        summary = summarize_latency_ms(lat_ms)
+        summary.update({
+            "bench_id": BENCH_A1,
+            "tool_id": TOOL_PG,
+            "format": args.format,
+            "sequence": args.sequence,
+            "overlay": args.overlay,
+            "window_s": float(args.window_s),
+            "steps": int(args.steps),
+            "meta": meta,
+        })
+        write_json(out / "summary.json", summary)
+        write_json(out / "latencies_ms.json", {"lat_ms": lat_ms})
+
+    def schedule_next(delay_ms: float = 0.0) -> None:
+        QtCore.QTimer.singleShot(int(max(0, delay_ms)), run_step)
+
+    def check_paint() -> None:
+        nonlocal step_idx, prev_paints
+        if plot.paint_count > prev_paints:
+            end_paint = plot.last_paint_ms
+            prev_paints = plot.paint_count
+            lat_ms.append(float(end_paint - step_start_ms) if np.isfinite(end_paint) else float("nan"))
+            step_idx += 1
+            schedule_next(float(args.step_delay_ms))
+            return
+        if _now_ms() >= step_deadline_ms:
+            lat_ms.append(float("nan"))
+            step_idx += 1
+            schedule_next(float(args.step_delay_ms))
+            return
+        QtCore.QTimer.singleShot(1, check_paint)
+
+    def run_step() -> None:
+        nonlocal step_idx, step_start_ms, step_deadline_ms
+        if step_idx >= len(ranges):
+            finalize()
+            app.quit()
+            return
+        x0, x1 = ranges[step_idx]
+        step_start_ms = _now_ms()
+        step_deadline_ms = step_start_ms + float(args.paint_timeout_ms)
         plot.setXRange(x0, x1, padding=0.0)
-        end_paint = wait_next_paint(app, plot, prev_paints)
-        prev_paints = plot.paint_count
-        lat_ms.append(float(end_paint - start) if np.isfinite(end_paint) else float("nan"))
+        check_paint()
 
-    summary = summarize_latency_ms(lat_ms)
-    summary.update({
-        "bench_id": BENCH_A1,
-        "tool_id": TOOL_PG,
-        "format": args.format,
-        "sequence": args.sequence,
-        "overlay": args.overlay,
-        "window_s": float(args.window_s),
-        "steps": int(args.steps),
-        "meta": meta,
-    })
-    write_json(out / "summary.json", summary)
-    write_json(out / "latencies_ms.json", {"lat_ms": lat_ms})
+    schedule_next(0.0)
+    app.exec_()
+
+    return
 
 
 if __name__ == "__main__":

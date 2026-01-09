@@ -146,8 +146,11 @@ def main() -> None:
     p.add_argument("--out-root", type=Path, default=Path("outputs"))
     p.add_argument("--tag", type=str, required=True)
 
+    p.add_argument("--format", choices=[FMT_EDF, FMT_NWB], default=None, help="Single format override.")
     p.add_argument("--formats", nargs="+", choices=[FMT_EDF, FMT_NWB], default=[FMT_EDF])
     p.add_argument("--tools", nargs="+", default=["all"], help="Subset of tools; or 'all'")
+    p.add_argument("--tool", type=str, default=None, help="Single tool override (e.g., IO_MNE).")
+    p.add_argument("--file", type=Path, default=None, help="Single file override.")
 
     p.add_argument("--n-files", type=int, default=3)
     p.add_argument("--runs", type=int, default=3)
@@ -160,19 +163,28 @@ def main() -> None:
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     p.add_argument("--nwb-dataset-path", type=str, default=None)
     p.add_argument("--cache-state", choices=["CACHE_WARM", "CACHE_COLD"], default="CACHE_WARM")
+    p.add_argument("--append-format-tag", dest="append_format_tag", action="store_true", default=True)
+    p.add_argument("--no-append-format-tag", dest="append_format_tag", action="store_false")
 
     args = p.parse_args()
+
+    formats = [args.format] if args.format else list(args.formats)
 
     fmt_tools = {
         FMT_EDF: [TOOL_IO_PYEDFLIB, TOOL_IO_MNE, TOOL_IO_NEO],
         FMT_NWB: [TOOL_IO_PYNWB, TOOL_IO_H5PY],
     }
 
-    if args.tools == ["all"]:
-        tool_sel = {fmt: fmt_tools[fmt] for fmt in args.formats}
+    if args.tool:
+        tool_sel = {
+            fmt: [args.tool] if args.tool in fmt_tools.get(fmt, []) else []
+            for fmt in formats
+        }
+    elif args.tools == ["all"]:
+        tool_sel = {fmt: fmt_tools[fmt] for fmt in formats}
     else:
         wanted = set(args.tools)
-        tool_sel = {fmt: [t for t in fmt_tools[fmt] if t in wanted] for fmt in args.formats}
+        tool_sel = {fmt: [t for t in fmt_tools[fmt] if t in wanted] for fmt in formats}
 
     meta_base = {
         "env": env_info(),
@@ -184,14 +196,18 @@ def main() -> None:
         "cache_state": args.cache_state,
     }
 
-    for fmt in args.formats:
-        files = _list_files(args.data_dir, fmt, args.n_files)
+    for fmt in formats:
+        if args.file is not None:
+            files = [args.file]
+        else:
+            files = _list_files(args.data_dir, fmt, args.n_files)
 
         for tool_id in tool_sel.get(fmt, []):
             lat_ms: List[float] = []
             per_file: List[Dict[str, Any]] = []
 
-            out = out_dir(args.out_root, BENCH_IO, tool_id, args.tag + f"_{fmt.lower()}")
+            tag = args.tag + f"_{fmt.lower()}" if args.append_format_tag else args.tag
+            out = out_dir(args.out_root, BENCH_IO, tool_id, tag)
             ensure_dir(out)
 
             extra = dict(meta_base)
