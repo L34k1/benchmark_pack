@@ -359,10 +359,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
     ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], default=FMT_EDF)
-    ap.add_argument("--edf", type=str, required=True)
-    ap.add_argument("--n-channels", type=int, default=8)
-    ap.add_argument("--load-start", type=float, default=0.0)
-    ap.add_argument("--load-duration", type=float, default=75.0)
+    ap.add_argument("--edf", type=str, default=None)
+    ap.add_argument("--file", type=Path, default=None)
+    ap.add_argument("--n-channels", "--n-ch", dest="n_channels", type=int, default=8)
+    ap.add_argument("--load-start", "--load-start-s", dest="load_start", type=float, default=0.0)
+    ap.add_argument("--load-duration", "--load-duration-s", dest="load_duration", type=float, default=75.0)
     ap.add_argument(
         "--max-points-per-trace",
         type=int,
@@ -374,7 +375,7 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=180)
     ap.add_argument("--out-root", type=Path, default=Path("outputs"))
     ap.add_argument("--tag", type=str, default="edf_A2")
-    ap.add_argument("--overlay-state", type=str, default=OVL_OFF)
+    ap.add_argument("--overlay-state", "--overlay", dest="overlay_state", type=str, default=OVL_OFF)
     ap.add_argument("--cache-state", type=str, default=CACHE_WARM)
     ap.add_argument(
         "--sequence",
@@ -390,8 +391,9 @@ def main() -> None:
     write_manifest(out_base, BENCH_A2, TOOL_PLOTLY, vars(args), extra={'format': args.format})
     out_html = out_base / 'plotly_A2_interactions.html'
 
-
-    data_path = args.data_dir / args.edf
+    data_path = args.file or (args.data_dir / args.edf if args.edf else None)
+    if data_path is None:
+        raise SystemExit("Provide --file or --edf with --data-dir.")
     if not data_path.exists():
         raise FileNotFoundError(data_path)
 

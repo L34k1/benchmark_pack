@@ -300,6 +300,8 @@ async function run() {{
     steps: PAYLOAD.steps,
     target_interval_ms: PAYLOAD.target_interval_ms,
     frames_presented: lat.length,
+    lat_ms: lat,
+    lateness_ms: (PAYLOAD.bench_id === 'A2_CADENCED') ? lateness : null,
     lat_p50_ms: pct(lat, 50),
     lat_p95_ms: pct(lat, 95),
     lat_max_ms: Math.max(...lat),
