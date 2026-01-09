@@ -7,6 +7,21 @@ A minimal, reproducible folder structure for EEG benchmarking scripts with consi
 - Put EDF files under `./data/` (this pack does not ship data).
 - Run commands from the project root (so `benchkit` imports resolve).
 
+## PyQtGraph A1/A2 hang repro + fix note
+
+**What was happening:** PyQtGraph A1/A2 could appear to stall during pan/zoom sequences if the UI stopped emitting paint events; the job would keep running without output, and the orchestrator would wait indefinitely.  
+**What changed:** A1/A2 now log each phase, emit a 1s heartbeat, enforce per-step and per-run timeouts, and `run_all.py` will terminate jobs that stop emitting output (with a tail snippet for debugging).
+
+Minimal repro command (single job, ZOOM_IN). Replace `__DATA_FILE__` with your EDF path:
+
+```powershell
+python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "__DATA_FILE__" --tag repro --window-s 60 --load-duration-s 60 --n-ch 8 --sequence ZOOM_IN --steps 60
+```
+
+```bat
+python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "__DATA_FILE__" --tag repro --window-s 60 --load-duration-s 60 --n-ch 8 --sequence ZOOM_IN --steps 60
+```
+
 ## Quick commands
 
 ## Quick setup (Windows PowerShell copy/paste)

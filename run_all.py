@@ -14,7 +14,9 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
+
+from collections import deque
 
 from benchkit.capabilities import check_format_dependency, check_tool, playwright_available
 from benchkit.common import ensure_dir
@@ -76,6 +78,7 @@ class Job:
     out_dir: Path
     cmd: List[str]
     timeout_s: float
+    heartbeat_timeout_s: float
     job_id: str
     skip_reason: Optional[str] = None
 
@@ -245,6 +248,7 @@ def run_job(job: Job, log_path: Path, logger: logging.Logger, force: bool) -> Tu
     start = time.time()
     last_activity = {"ts": start}
     log_lock = threading.Lock()
+    tail_lines: Deque[str] = deque(maxlen=50)
 
     def stream_reader(stream, label: str) -> None:
         with log_path.open("a", encoding="utf-8") as log_file:
@@ -252,6 +256,7 @@ def run_job(job: Job, log_path: Path, logger: logging.Logger, force: bool) -> Tu
                 with log_lock:
                     log_file.write(line)
                     log_file.flush()
+                    tail_lines.append(f"[{label}] {line.rstrip()}")
                 last_activity["ts"] = time.time()
         stream.close()
 
@@ -270,22 +275,44 @@ def run_job(job: Job, log_path: Path, logger: logging.Logger, force: bool) -> Tu
     warn_every_s = 60.0
     next_warn = start + max(10.0, job.timeout_s * 0.6)
 
+    def terminate_proc(reason: str) -> None:
+        logger.error("Terminating job %s: %s", job.job_id, reason)
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    def tail_snippet() -> str:
+        if not tail_lines:
+            return ""
+        return "\n".join(tail_lines)
+
     while True:
         if proc.poll() is not None:
             break
         now = time.time()
         elapsed = now - start
         if elapsed > job.timeout_s:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            terminate_proc(f"timeout exceeded {job.timeout_s}s")
             for t in threads:
                 t.join(timeout=1)
-            return "FAIL", "timeout", f"Exceeded timeout {job.timeout_s}s", elapsed
+            snippet = tail_snippet()
+            msg = f"Exceeded timeout {job.timeout_s}s"
+            if snippet:
+                msg += f"\nLast output:\n{snippet}"
+            return "FAIL", "timeout", msg, elapsed
+        idle_s = now - last_activity["ts"]
+        if idle_s > job.heartbeat_timeout_s:
+            terminate_proc(f"idle for {idle_s:.1f}s (heartbeat timeout {job.heartbeat_timeout_s}s)")
+            for t in threads:
+                t.join(timeout=1)
+            snippet = tail_snippet()
+            msg = f"No heartbeat for {idle_s:.1f}s (limit {job.heartbeat_timeout_s}s)"
+            if snippet:
+                msg += f"\nLast output:\n{snippet}"
+            return "FAIL", "no_heartbeat", msg, elapsed
         if now >= next_warn:
-            idle_s = now - last_activity["ts"]
             logger.warning(
                 "Job %s still running (elapsed=%.1fs, last_activity=%.1fs)",
                 job.job_id,
@@ -527,6 +554,8 @@ def build_command(job: Job, tool_cfg: ToolConfig) -> List[str]:
         cmd += ["--sequence", job.sequence]
     if job.bench_id == BENCH_A2 and job.cadence_ms is not None:
         cmd += ["--target-interval-ms", str(job.cadence_ms)]
+    if job.tool_id == TOOL_PG and job.bench_id in (BENCH_A1, BENCH_A2):
+        cmd += ["--run-timeout-s", str(job.timeout_s)]
     return cmd
 
 
@@ -555,6 +584,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--force", action="store_true")
     p.add_argument("--max-parallel", type=int, default=1)
     p.add_argument("--timeout-s", type=float, default=None)
+    p.add_argument("--heartbeat-timeout-s", type=float, default=15.0)
     return p.parse_args()
 
 
@@ -674,6 +704,7 @@ def main() -> int:
                                                     out_dir=out_dir,
                                                     cmd=[],
                                                     timeout_s=timeout_s,
+                                                    heartbeat_timeout_s=float(args.heartbeat_timeout_s),
                                                     job_id="",
                                                 ),
                                                 tool_cfg,
@@ -694,6 +725,7 @@ def main() -> int:
                                                 out_dir=out_dir,
                                                 cmd=cmd,
                                                 timeout_s=timeout_s,
+                                                heartbeat_timeout_s=float(args.heartbeat_timeout_s),
                                                 job_id=job_id,
                                             )
                                             if not tool_ok:
