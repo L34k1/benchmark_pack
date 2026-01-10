@@ -10,7 +10,7 @@ A minimal, reproducible folder structure for EEG benchmarking scripts with consi
 ## PyQtGraph A1/A2 hang repro + fix note
 
 **What was happening:** PyQtGraph A1/A2 could appear to stall during pan/zoom sequences if the UI stopped emitting paint events; the job would keep running without output, and the orchestrator would wait indefinitely.  
-**What changed:** A1/A2 now log each phase, emit a 1s heartbeat, enforce per-step and per-run timeouts, and `run_all.py` will terminate jobs that stop emitting output (with a tail snippet for debugging). A1 also treats zoom saturation as a NOOP step so ZOOM_IN/ZOOM_OUT runs complete without timing out when the range stops changing.
+**What changed:** A1/A2 now log each phase, emit a 1s heartbeat, enforce per-step and per-run timeouts, and `run_all.py` will terminate jobs that stop emitting output (with a tail snippet for debugging). A1/A2 treat zoom saturation as a NOOP step so ZOOM_IN/ZOOM_OUT runs complete without timing out when the range stops changing.
 
 Minimal repro command (single job, ZOOM_IN). Replace `__DATA_FILE__` with your EDF path:
 
