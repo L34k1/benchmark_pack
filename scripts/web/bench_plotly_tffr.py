@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
+from benchkit.bench_defaults import DEFAULT_WINDOW_S
 from benchkit.lexicon import BENCH_TFFR, FMT_EDF, FMT_NWB, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
@@ -146,7 +147,7 @@ def main() -> None:
     ap.add_argument("--edf", type=str, default=None, help="EDF/NWB filename inside --data-dir.")
     ap.add_argument("--file", type=Path, default=None, help="Full path to EDF/NWB file.")
     ap.add_argument("--n-channels", "--n-ch", dest="n_channels", type=int, default=8)
-    ap.add_argument("--window-s", type=float, default=10.0)
+    ap.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     ap.add_argument("--max-points-per-trace", type=int, default=20000)
     ap.add_argument("--out-root", type=Path, default=Path("outputs"))
     ap.add_argument("--tag", type=str, default="edf_tffr")

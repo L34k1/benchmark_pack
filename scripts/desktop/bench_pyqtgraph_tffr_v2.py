@@ -16,6 +16,7 @@ import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 
 from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.bench_defaults import DEFAULT_WINDOW_S, default_load_duration_s
 from benchkit.lexicon import BENCH_TFFR, FMT_EDF, FMT_NWB, OVL_OFF, OVL_ON, TOOL_PG
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
@@ -70,8 +71,8 @@ def main() -> None:
 
     p.add_argument("--n-ch", type=int, default=16)
     p.add_argument("--load-start-s", type=float, default=0.0)
-    p.add_argument("--load-duration-s", type=float, default=1900.0)
-    p.add_argument("--window-s", type=float, default=60.0)
+    p.add_argument("--load-duration-s", type=float, default=None)
+    p.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     p.add_argument("--max-points-per-trace", type=int, default=5000)
 
     p.add_argument("--overlay", choices=[OVL_OFF, OVL_ON], default=OVL_OFF)
@@ -81,6 +82,8 @@ def main() -> None:
 
     p.add_argument("--pause-ms", type=int, default=250)
     args = p.parse_args()
+    if args.load_duration_s is None:
+        args.load_duration_s = default_load_duration_s(args.window_s)
 
     out = out_dir(args.out_root, BENCH_TFFR, TOOL_PG, args.tag)
     ensure_dir(out)
