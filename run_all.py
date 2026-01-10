@@ -20,6 +20,12 @@ from collections import deque
 
 from benchkit.capabilities import check_format_dependency, check_tool, playwright_available
 from benchkit.common import ensure_dir
+from benchkit.bench_defaults import (
+    DEFAULT_LOAD_DURATION_MULTIPLIER,
+    DEFAULT_TARGET_INTERVAL_MS,
+    DEFAULT_WINDOW_S,
+    default_load_duration_s,
+)
 from benchkit.lexicon import (
     BENCH_A1,
     BENCH_A2,
@@ -69,6 +75,7 @@ class Job:
     fmt: str
     file_path: Path
     window_s: float
+    load_duration_s: float
     n_channels: int
     sequence: str
     overlay: str
@@ -111,6 +118,7 @@ def build_tag(job: Dict[str, object]) -> str:
         base,
         f"fmt{job['format']}",
         f"win{job['window_s']}s",
+        f"dur{job['load_duration_s']}s",
         f"ch{job['n_channels']}",
         f"seq{job['sequence']}",
         f"ovl{job['overlay']}",
@@ -133,6 +141,7 @@ def timings_header() -> List[str]:
         "format",
         "file",
         "window_s",
+        "load_duration_s",
         "n_channels",
         "sequence",
         "overlay",
@@ -498,6 +507,8 @@ def build_command(job: Job, tool_cfg: ToolConfig) -> List[str]:
             str(job.n_channels),
             "--window-s",
             str(job.window_s),
+            "--load-duration-s",
+            str(job.load_duration_s),
             "--sequence",
             job.sequence,
             "--runs",
@@ -521,6 +532,13 @@ def build_command(job: Job, tool_cfg: ToolConfig) -> List[str]:
             job.tag,
             "--window-s",
             str(job.window_s),
+        ]
+        if tool_cfg.tool_id == TOOL_D3 or job.bench_id != BENCH_TFFR:
+            if tool_cfg.tool_id == TOOL_PLOTLY:
+                cmd += ["--load-duration", str(job.load_duration_s)]
+            else:
+                cmd += ["--load-duration-s", str(job.load_duration_s)]
+        cmd += [
             "--n-ch",
             str(job.n_channels),
             "--overlay",
@@ -545,6 +563,8 @@ def build_command(job: Job, tool_cfg: ToolConfig) -> List[str]:
         job.tag,
         "--window-s",
         str(job.window_s),
+        "--load-duration-s",
+        str(job.load_duration_s),
         "--n-ch",
         str(job.n_channels),
         "--overlay",
@@ -570,7 +590,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-dir", type=Path, default=Path("data"))
     p.add_argument("--out-root", type=Path, default=Path("outputs"))
     p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--windows", nargs="+", type=float, default=[60, 600, 1800])
+    default_windows = [
+        DEFAULT_WINDOW_S,
+        DEFAULT_WINDOW_S * 10,
+        DEFAULT_WINDOW_S * 30,
+    ]
+    p.add_argument("--windows", nargs="+", type=float, default=default_windows)
     p.add_argument("--channels", nargs="+", type=int, default=[8, 16, 32, 64])
     p.add_argument(
         "--sequences",
@@ -580,7 +605,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--overlays", nargs="+", default=[OVL_OFF, OVL_ON])
     p.add_argument("--modes", nargs="+", default=["IO", "TFFR", "A1", "A2"])
     p.add_argument("--tools", nargs="+", default=["all"])
-    p.add_argument("--cadence-ms", nargs="+", type=float, default=[16.666])
+    p.add_argument("--cadence-ms", nargs="+", type=float, default=[DEFAULT_TARGET_INTERVAL_MS])
+    p.add_argument("--load-duration-multiplier", type=float, default=DEFAULT_LOAD_DURATION_MULTIPLIER)
     p.add_argument("--force", action="store_true")
     p.add_argument("--max-parallel", type=int, default=1)
     p.add_argument("--timeout-s", type=float, default=None)
@@ -673,12 +699,16 @@ def main() -> int:
                                         cadence_list = args.cadence_ms
                                     for cadence_ms in cadence_list:
                                         for run_id in range(int(args.runs)):
+                                            load_duration_s = default_load_duration_s(
+                                                window_s, args.load_duration_multiplier
+                                            )
                                             job_payload = {
                                                 "bench_id": bench_id,
                                                 "tool_id": tool_id,
                                                 "format": fmt,
                                                 "file": file_path.name,
                                                 "window_s": window_s,
+                                                "load_duration_s": load_duration_s,
                                                 "n_channels": n_channels,
                                                 "sequence": sequence,
                                                 "overlay": overlay,
@@ -695,6 +725,7 @@ def main() -> int:
                                                     fmt=fmt,
                                                     file_path=file_path,
                                                     window_s=window_s,
+                                                    load_duration_s=load_duration_s,
                                                     n_channels=n_channels,
                                                     sequence=sequence,
                                                     overlay=overlay,
@@ -716,6 +747,7 @@ def main() -> int:
                                                 fmt=fmt,
                                                 file_path=file_path,
                                                 window_s=window_s,
+                                                load_duration_s=load_duration_s,
                                                 n_channels=n_channels,
                                                 sequence=sequence,
                                                 overlay=overlay,
@@ -768,6 +800,7 @@ def main() -> int:
                     job.fmt,
                     str(job.file_path),
                     f"{job.window_s}",
+                    f"{job.load_duration_s}",
                     str(job.n_channels),
                     job.sequence,
                     job.overlay,
