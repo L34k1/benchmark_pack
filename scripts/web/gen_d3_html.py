@@ -14,6 +14,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.bench_defaults import (
+    DEFAULT_STEPS,
+    DEFAULT_TARGET_INTERVAL_MS,
+    DEFAULT_WINDOW_S,
+    default_load_duration_s,
+)
 from benchkit.lexicon import (
     BENCH_TFFR,
     BENCH_A1,
@@ -330,13 +336,13 @@ def main() -> None:
     p.add_argument("--tag", type=str, required=True)
 
     p.add_argument("--sequence", choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM], default=SEQ_PAN_ZOOM)
-    p.add_argument("--steps", type=int, default=200)
-    p.add_argument("--target-interval-ms", type=float, default=16.0)
+    p.add_argument("--steps", type=int, default=DEFAULT_STEPS)
+    p.add_argument("--target-interval-ms", type=float, default=DEFAULT_TARGET_INTERVAL_MS)
 
     p.add_argument("--n-ch", type=int, default=16)
     p.add_argument("--load-start-s", type=float, default=0.0)
-    p.add_argument("--load-duration-s", type=float, default=1900.0)
-    p.add_argument("--window-s", type=float, default=60.0)
+    p.add_argument("--load-duration-s", type=float, default=None)
+    p.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     p.add_argument("--max-points-per-trace", type=int, default=5000)
     p.add_argument("--overlay", choices=[OVL_OFF, OVL_ON], default=OVL_OFF)
 
@@ -344,6 +350,8 @@ def main() -> None:
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     p.add_argument("--d3-module", action="store_true", help="Use ESM module import for D3.js")
     args = p.parse_args()
+    if args.load_duration_s is None:
+        args.load_duration_s = default_load_duration_s(args.window_s)
 
     out = out_dir(args.out_root, args.bench_id, TOOL_D3, args.tag)
     ensure_dir(out)
