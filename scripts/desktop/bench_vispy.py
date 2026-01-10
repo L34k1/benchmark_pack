@@ -40,6 +40,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest
+from benchkit.bench_defaults import (
+    DEFAULT_STEPS,
+    DEFAULT_TARGET_INTERVAL_MS,
+    DEFAULT_WINDOW_S,
+    PAN_STEP_FRACTION,
+    ZOOM_IN_FACTOR,
+    ZOOM_OUT_FACTOR,
+    default_load_duration_s,
+)
 from benchkit.lexicon import (
     BENCH_A1,
     BENCH_A2,
@@ -83,7 +92,7 @@ def clamp_range(x0: float, x1: float, lo: float, hi: float) -> Tuple[float, floa
 def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: int) -> List[Tuple[float, float]]:
     x0, x1 = lo, min(lo + window_s, hi)
     w = x1 - x0
-    pan_step = w * 0.10
+    pan_step = w * PAN_STEP_FRACTION
     rng: List[Tuple[float, float]] = []
 
     for i in range(steps):
@@ -93,11 +102,11 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
                 pan_step *= -1.0
         elif sequence == SEQ_ZOOM_IN:
             cx = 0.5 * (x0 + x1)
-            w = max(w * 0.90, window_s * 0.10)
+            w = max(w * ZOOM_IN_FACTOR, window_s * 0.10)
             x0, x1 = cx - 0.5 * w, cx + 0.5 * w
         elif sequence == SEQ_ZOOM_OUT:
             cx = 0.5 * (x0 + x1)
-            w = min(w * 1.10, hi - lo)
+            w = min(w * ZOOM_OUT_FACTOR, hi - lo)
             x0, x1 = cx - 0.5 * w, cx + 0.5 * w
         elif sequence == SEQ_PAN_ZOOM:
             if i % 2 == 0:
@@ -106,7 +115,7 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
                     pan_step *= -1.0
             else:
                 cx = 0.5 * (x0 + x1)
-                w = max(min(w * 0.95, hi - lo), window_s * 0.10)
+                w = max(min(w * ZOOM_IN_FACTOR, hi - lo), window_s * 0.10)
                 x0, x1 = cx - 0.5 * w, cx + 0.5 * w
         else:
             raise ValueError(sequence)
@@ -498,12 +507,12 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--n-ch", type=int, default=16)
     ap.add_argument("--load-start-s", type=float, default=0.0)
-    ap.add_argument("--load-duration-s", type=float, default=300.0)
+    ap.add_argument("--load-duration-s", type=float, default=None)
     ap.add_argument("--max-points-per-trace", type=int, default=0)
-    ap.add_argument("--window-s", type=float, default=10.0)
+    ap.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     ap.add_argument("--sequence", choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM], default=SEQ_PAN_ZOOM)
-    ap.add_argument("--steps", type=int, default=200)
-    ap.add_argument("--target-interval-ms", type=float, default=16.0)
+    ap.add_argument("--steps", type=int, default=DEFAULT_STEPS)
+    ap.add_argument("--target-interval-ms", type=float, default=DEFAULT_TARGET_INTERVAL_MS)
     ap.add_argument("--eps", type=float, default=1e-3)
     ap.add_argument("--hard-timeout-s", type=float, default=30.0)
     ap.add_argument("--width", type=int, default=1200)
@@ -515,6 +524,8 @@ def main() -> None:
     ap.add_argument("--nwb-series-path", type=str, default=None)
     ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
+    if args.load_duration_s is None:
+        args.load_duration_s = default_load_duration_s(args.window_s)
 
     t, data, meta, fs = load_segment(args)
 

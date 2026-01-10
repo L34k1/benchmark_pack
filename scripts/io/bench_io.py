@@ -23,6 +23,8 @@ name in this pack is T_read_window_ch0_s.
 """
 from __future__ import annotations
 
+import sys
+
 import argparse
 import pathlib
 import time
@@ -31,6 +33,10 @@ from typing import Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import out_dir, write_manifest, utc_stamp
 from benchkit.lexicon import BENCH_IO, FMT_EDF

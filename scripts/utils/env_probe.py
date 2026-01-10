@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import sys
+
 import argparse
 import platform
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from benchkit.common import env_info, write_json
 
