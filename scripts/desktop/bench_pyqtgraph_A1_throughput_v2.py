@@ -17,7 +17,14 @@ import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 
 from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
-from benchkit.bench_defaults import DEFAULT_STEPS, DEFAULT_WINDOW_S, default_load_duration_s
+from benchkit.bench_defaults import (
+    DEFAULT_STEPS,
+    DEFAULT_WINDOW_S,
+    PAN_STEP_FRACTION,
+    ZOOM_IN_FACTOR,
+    ZOOM_OUT_FACTOR,
+    default_load_duration_s,
+)
 from benchkit.lexicon import (
     BENCH_A1, FMT_EDF, FMT_NWB, OVL_OFF, OVL_ON,
     SEQ_PAN, SEQ_PAN_ZOOM, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, TOOL_PG
@@ -80,7 +87,7 @@ def _clamp_range(x0: float, x1: float, lo: float, hi: float) -> Tuple[float, flo
 def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: int) -> List[Tuple[float, float]]:
     x0, x1 = lo, min(lo + window_s, hi)
     w = x1 - x0
-    pan_step = w * 0.10
+    pan_step = w * PAN_STEP_FRACTION
     rng: List[Tuple[float, float]] = []
 
     for i in range(steps):
@@ -91,12 +98,12 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
 
         elif sequence == SEQ_ZOOM_IN:
             cx = 0.5 * (x0 + x1)
-            w = max(w * 0.90, window_s * 0.10)
+            w = max(w * ZOOM_IN_FACTOR, window_s * 0.10)
             x0, x1 = cx - 0.5 * w, cx + 0.5 * w
 
         elif sequence == SEQ_ZOOM_OUT:
             cx = 0.5 * (x0 + x1)
-            w = min(w * 1.10, hi - lo)
+            w = min(w * ZOOM_OUT_FACTOR, hi - lo)
             x0, x1 = cx - 0.5 * w, cx + 0.5 * w
 
         elif sequence == SEQ_PAN_ZOOM:
@@ -106,7 +113,7 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
                     pan_step *= -1.0
             else:
                 cx = 0.5 * (x0 + x1)
-                w = max(min(w * 0.95, hi - lo), window_s * 0.10)
+                w = max(min(w * ZOOM_IN_FACTOR, hi - lo), window_s * 0.10)
                 x0, x1 = cx - 0.5 * w, cx + 0.5 * w
         else:
             raise ValueError(sequence)
