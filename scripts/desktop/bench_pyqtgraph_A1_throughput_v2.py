@@ -196,7 +196,7 @@ def main() -> None:
     lo, hi = float(t[0]), float(t[-1])
     ranges = build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))
 
-    lat_ms: List[float] = []
+    steps_rows: List[Dict[str, object]] = []
     prev_paints = plot.paint_count
     step_idx = 0
     step_start_ms = float("nan")
@@ -222,10 +222,35 @@ def main() -> None:
         steps_csv = out / "steps.csv"
         with steps_csv.open("w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["step_id", "latency_ms"])
-            for i, lat in enumerate(lat_ms):
-                w.writerow([i, f"{lat:.3f}"])
+            w.writerow(
+                [
+                    "step_id",
+                    "status",
+                    "noop",
+                    "latency_ms",
+                    "xmin",
+                    "xmax",
+                    "span",
+                    "paint_delta",
+                    "range_signal",
+                ]
+            )
+            for row in steps_rows:
+                w.writerow(
+                    [
+                        row["step_id"],
+                        row["status"],
+                        row["noop"],
+                        f"{row['latency_ms']:.3f}",
+                        f"{row['xmin']:.6f}",
+                        f"{row['xmax']:.6f}",
+                        f"{row['span']:.6f}",
+                        row["paint_delta"],
+                        row["range_signal"],
+                    ]
+                )
 
+        lat_ms = [row["latency_ms"] for row in steps_rows if row["status"] in ("OK", "NOOP")]
         summary = summarize_latency_ms(lat_ms)
         summary.update({
             "bench_id": BENCH_A1,
@@ -264,13 +289,37 @@ def main() -> None:
             return
         if plot.paint_count > prev_paints or range_updated:
             end_paint = plot.last_paint_ms
+            paint_delta = plot.paint_count - prev_paints
             prev_paints = plot.paint_count
             finish = float(end_paint) if np.isfinite(end_paint) else _now_ms()
-            lat_ms.append(float(finish - step_start_ms))
+            view_range = view_box.viewRange()[0]
+            xmin, xmax = float(view_range[0]), float(view_range[1])
+            span = float(xmax - xmin)
+            steps_rows.append(
+                {
+                    "step_id": step_idx,
+                    "status": "OK",
+                    "noop": False,
+                    "latency_ms": float(finish - step_start_ms),
+                    "xmin": xmin,
+                    "xmax": xmax,
+                    "span": span,
+                    "paint_delta": int(paint_delta),
+                    "range_signal": bool(range_updated),
+                }
+            )
+            _log(
+                "phase=step_done idx=%d status=OK paint_delta=%d range_signal=%s"
+                % (step_idx, paint_delta, bool(range_updated))
+            )
             step_idx += 1
             schedule_next(float(args.step_delay_ms))
             return
         if _now_ms() >= step_deadline_ms:
+            _log(
+                "phase=step_timeout idx=%d paint_delta=%d range_signal=%s"
+                % (step_idx, plot.paint_count - prev_paints, bool(range_updated))
+            )
             fail_run(f"step_timeout step={step_idx} timeout_ms={args.step_timeout_ms}")
             return
         QtCore.QTimer.singleShot(1, check_paint)
@@ -283,13 +332,59 @@ def main() -> None:
             finalize()
             app.quit()
             return
-        x0, x1 = ranges[step_idx]
-        _log(f"phase=step idx={step_idx} x0={x0:.6f} x1={x1:.6f}")
+        view_range = view_box.viewRange()[0]
+        old_x0, old_x1 = float(view_range[0]), float(view_range[1])
+        requested = ranges[step_idx]
+        clamped = _clamp_range(requested[0], requested[1], lo, hi)
+        old_span = float(old_x1 - old_x0)
+        new_span = float(clamped[1] - clamped[0])
+        eps = 1e-9 * max(1.0, old_span)
+        noop = abs(clamped[0] - old_x0) <= eps and abs(clamped[1] - old_x1) <= eps
+        clamped_reason = "normal"
+        if not _range_close(requested, clamped):
+            clamped_reason = "clamped"
+        if noop:
+            clamped_reason = "noop"
+        _log(
+            "phase=step idx=%d seq=%s old_x=(%.6f,%.6f) req_x=(%.6f,%.6f) clamp_x=(%.6f,%.6f) "
+            "span_old=%.6f span_new=%.6f reason=%s"
+            % (
+                step_idx,
+                args.sequence,
+                old_x0,
+                old_x1,
+                requested[0],
+                requested[1],
+                clamped[0],
+                clamped[1],
+                old_span,
+                new_span,
+                clamped_reason,
+            )
+        )
         range_updated = False
-        expected_range = (x0, x1)
+        expected_range = clamped
         step_start_ms = _now_ms()
         step_deadline_ms = step_start_ms + float(args.step_timeout_ms)
-        plot.setXRange(x0, x1, padding=0.0)
+        if noop:
+            steps_rows.append(
+                {
+                    "step_id": step_idx,
+                    "status": "NOOP",
+                    "noop": True,
+                    "latency_ms": 0.0,
+                    "xmin": float(clamped[0]),
+                    "xmax": float(clamped[1]),
+                    "span": float(new_span),
+                    "paint_delta": 0,
+                    "range_signal": False,
+                }
+            )
+            _log("phase=step_done idx=%d status=NOOP paint_delta=0 range_signal=False" % step_idx)
+            step_idx += 1
+            schedule_next(float(args.step_delay_ms))
+            return
+        plot.setXRange(clamped[0], clamped[1], padding=0.0)
         plot.repaint()
         check_paint()
 
