@@ -7,6 +7,21 @@ A minimal, reproducible folder structure for EEG benchmarking scripts with consi
 - Put EDF files under `./data/` (this pack does not ship data).
 - Run commands from the project root (so `benchkit` imports resolve).
 
+## PyQtGraph A1/A2 hang repro + fix note
+
+**What was happening:** PyQtGraph A1/A2 could appear to stall during pan/zoom sequences if the UI stopped emitting paint events; the job would keep running without output, and the orchestrator would wait indefinitely.  
+**What changed:** A1/A2 now log each phase, emit a 1s heartbeat, enforce per-step and per-run timeouts, and `run_all.py` will terminate jobs that stop emitting output (with a tail snippet for debugging). A1/A2 treat zoom saturation as a NOOP step so ZOOM_IN/ZOOM_OUT runs complete without timing out when the range stops changing.
+
+Minimal repro command (single job, ZOOM_IN). Replace `__DATA_FILE__` with your EDF path:
+
+```powershell
+python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "__DATA_FILE__" --tag repro --window-s 60 --load-duration-s 60 --n-ch 8 --sequence ZOOM_IN --steps 60
+```
+
+```bat
+python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "__DATA_FILE__" --tag repro --window-s 60 --load-duration-s 60 --n-ch 8 --sequence ZOOM_IN --steps 60
+```
+
 ## Quick commands
 
 ## Quick setup (Windows PowerShell copy/paste)
@@ -135,6 +150,25 @@ python -m scripts.web.collect_plotly_console_playwright --html outputs/A2_CADENC
 All outputs are written under `./outputs/<BENCH_ID>/<TOOL_ID>/<TAG>/`.
 
 Each run writes a `manifest.json` to record arguments and environment metadata.
+
+## Synthetic benchmark datasets
+
+Some EDF/NWB files ship with fewer than 64 channels, which can make `--n-ch 64` misleading if the loader caps to the available channels. Use the manual generator to create deterministic synthetic datasets with ≥64 channels and a full 30-minute duration.
+
+Generate datasets (manual only; nothing auto-generates):
+
+```bash
+python scripts/generate_synth_data.py --n-ch 64 --duration-s 1800 --fs-hz 250
+```
+
+This creates:
+
+- `data/synth_64ch_1800s_<fs>hz.edf`
+- `data/synth_64ch_1800s_<fs>hz.nwb`
+
+Recommended `--fs-hz` defaults:
+- 250 Hz keeps file sizes reasonable for 64 channels × 30 minutes.
+- Higher sampling rates scale file size and generation time linearly.
 
 ## Lexicon and status
 
