@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import math
+
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -139,9 +141,12 @@ run().catch(e => {{
 
 def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: int) -> List[Tuple[float, float]]:
     x0, x1 = lo, min(lo + window_s, hi)
-    w = x1 - x0
-    pan_step = w * PAN_STEP_FRACTION
+    base_span = x1 - x0
+    full_span = hi - lo
     out: List[Tuple[float, float]] = []
+
+    if steps <= 0:
+        return out
 
     def clamp(a: float, b: float) -> Tuple[float, float]:
         width = b - a
@@ -155,28 +160,46 @@ def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: in
             a, b = lo, hi
         return a, b
 
+    def pan_range(t: float, span: float) -> Tuple[float, float]:
+        max_shift = max(0.0, full_span - span)
+        shift = t * max_shift
+        a = lo + shift
+        return a, a + span
+
+    if full_span <= 0:
+        return [clamp(x0, x1) for _ in range(steps)]
+
+    pan_span = min(base_span, full_span * 0.9)
+    zoom_min_span = min(full_span, max(1e-6, min(base_span * 0.1, full_span * 0.25)))
+    center0 = 0.5 * (x0 + x1)
+
     for i in range(steps):
+        t = 1.0 if steps == 1 else i / (steps - 1)
         if sequence == SEQ_PAN:
-            x0, x1 = x0 + pan_step, x1 + pan_step
-            if x1 > hi or x0 < lo:
-                pan_step *= -1.0
+            span = pan_span
+            x0, x1 = pan_range(t, span)
         elif sequence == SEQ_ZOOM_IN:
-            cx = 0.5 * (x0 + x1)
-            w = max(w * ZOOM_IN_FACTOR, window_s * 0.10)
-            x0, x1 = cx - 0.5 * w, cx + 0.5 * w
-        elif sequence == SEQ_ZOOM_OUT:
-            cx = 0.5 * (x0 + x1)
-            w = min(w * ZOOM_OUT_FACTOR, hi - lo)
-            x0, x1 = cx - 0.5 * w, cx + 0.5 * w
-        elif sequence == SEQ_PAN_ZOOM:
-            if i % 2 == 0:
-                x0, x1 = x0 + pan_step, x1 + pan_step
-                if x1 > hi or x0 < lo:
-                    pan_step *= -1.0
+            span0, span1 = base_span, zoom_min_span
+            if math.isclose(span0, span1):
+                x0, x1 = pan_range(t, pan_span)
             else:
-                cx = 0.5 * (x0 + x1)
-                w = max(min(w * ZOOM_IN_FACTOR, hi - lo), window_s * 0.10)
-                x0, x1 = cx - 0.5 * w, cx + 0.5 * w
+                span = span0 + (span1 - span0) * t
+                x0, x1 = center0 - 0.5 * span, center0 + 0.5 * span
+        elif sequence == SEQ_ZOOM_OUT:
+            span0, span1 = zoom_min_span, full_span
+            if math.isclose(span0, span1):
+                x0, x1 = pan_range(t, pan_span)
+            else:
+                span = span0 + (span1 - span0) * t
+                x0, x1 = center0 - 0.5 * span, center0 + 0.5 * span
+        elif sequence == SEQ_PAN_ZOOM:
+            span0 = pan_span
+            span1 = min(span0, max(zoom_min_span, span0 * 0.5))
+            if math.isclose(span0, span1):
+                x0, x1 = pan_range(t, pan_span)
+            else:
+                span = span0 + (span1 - span0) * t
+                x0, x1 = pan_range(t, span)
         else:
             raise ValueError(sequence)
         x0, x1 = clamp(x0, x1)
@@ -309,7 +332,9 @@ def main() -> None:
     }
 
     if args.bench_id in (BENCH_A1, BENCH_A2):
-        payload["ranges"] = build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))
+        ranges = build_ranges(args.sequence, lo, hi, float(args.window_s), int(args.steps))
+        payload["ranges"] = ranges
+        payload["steps"] = len(ranges)
 
     html = html_template(payload)
     html_path = out / "plotly_bench.html"
