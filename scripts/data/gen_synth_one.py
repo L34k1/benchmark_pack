@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,11 +41,10 @@ def generate_signals(n_ch: int, n_samples: int, fs_hz: float, seed: int) -> np.n
 
 
 def write_edf(path: Path, data: np.ndarray, fs_hz: float) -> None:
-    try:
-        import pyedflib
-    except ImportError:
+    if importlib.util.find_spec("pyedflib") is None:
         print("SKIP_UNSUPPORTED_FORMAT")
         raise SystemExit(2)
+    import pyedflib
 
     n_ch, _ = data.shape
     labels = [f"ch{idx+1:02d}" for idx in range(n_ch)]
@@ -75,14 +75,13 @@ def write_edf(path: Path, data: np.ndarray, fs_hz: float) -> None:
 
 
 def write_nwb(path: Path, data: np.ndarray, fs_hz: float) -> None:
-    try:
-        from pynwb import NWBFile, NWBHDF5IO
-        from pynwb.ecephys import ElectricalSeries
-        from pynwb.file import Subject
-        from hdmf.backends.hdf5.h5_utils import H5DataIO
-    except ImportError:
+    if importlib.util.find_spec("pynwb") is None or importlib.util.find_spec("hdmf") is None:
         print("SKIP_UNSUPPORTED_FORMAT")
         raise SystemExit(2)
+    from pynwb import NWBFile, NWBHDF5IO
+    from pynwb.ecephys import ElectricalSeries
+    from pynwb.file import Subject
+    from hdmf.backends.hdf5.h5_utils import H5DataIO
 
     n_ch, n_samples = data.shape
     nwbfile = NWBFile(

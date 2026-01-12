@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 
 import argparse
+import importlib.util
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -166,11 +167,10 @@ def main() -> None:
         extra={"format": args.format},
     )
 
-    try:
-        import fastplotlib as fpl
-    except ModuleNotFoundError:
+    if importlib.util.find_spec("fastplotlib") is None:
         print("fastplotlib is not installed; skipping fastplotlib benchmark.")
         return
+    import fastplotlib as fpl
 
     t, data = load_segment(args)
     fig = fpl.Figure()
