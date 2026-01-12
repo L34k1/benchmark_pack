@@ -18,4 +18,11 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 %PYTHON% scripts\data\gen_synth_one.py --format %FORMAT% %*
-exit /b %ERRORLEVEL%
+if errorlevel 1 (
+  echo.
+  echo gen_synth_one failed with exit code %ERRORLEVEL%.
+  echo If you double-clicked the batch file, this pause keeps the window open.
+  pause
+  exit /b %ERRORLEVEL%
+)
+exit /b 0

@@ -10,7 +10,7 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 call gen_synth_one.bat EDF
-if errorlevel 1 exit /b %ERRORLEVEL%
+if errorlevel 1 goto fail
 
 set "DATA_EDF=%ROOT%data\_synth\synth_8ch_60s_250hz.edf"
 set "OUT_ROOT=%ROOT%outputs\smoke"
@@ -21,36 +21,64 @@ set "INTERVAL_MS=16.666"
 
 for %%S in (PAN ZOOM_IN PAN_ZOOM) do (
   call :run_tffr VIS_PYQTGRAPH scripts\desktop\bench_pyqtgraph_tffr_v2.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_PYQTGRAPH scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_PYQTGRAPH scripts\desktop\bench_pyqtgraph_A2_cadenced_v2.py %%S
+  if errorlevel 1 goto fail
 
   call :run_tffr VIS_VISPY scripts\desktop\bench_vispy.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_VISPY scripts\desktop\bench_vispy.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_VISPY scripts\desktop\bench_vispy.py %%S
+  if errorlevel 1 goto fail
 
   call :run_tffr VIS_DATOVIZ scripts\desktop\bench_datoviz.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_DATOVIZ scripts\desktop\bench_datoviz.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_DATOVIZ scripts\desktop\bench_datoviz.py %%S
+  if errorlevel 1 goto fail
 
   call :run_tffr VIS_FASTPLOTLIB scripts\desktop\bench_fastplotlib.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_FASTPLOTLIB scripts\desktop\bench_fastplotlib.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_FASTPLOTLIB scripts\desktop\bench_fastplotlib.py %%S
+  if errorlevel 1 goto fail
 
   call :run_tffr VIS_MNE_RAWPLOT scripts\desktop\bench_mne_rawplot.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_MNE_RAWPLOT scripts\desktop\bench_mne_rawplot.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_MNE_RAWPLOT scripts\desktop\bench_mne_rawplot.py %%S
+  if errorlevel 1 goto fail
 
   call :run_tffr VIS_PLOTLY scripts\web\bench_plotly_tffr.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_PLOTLY scripts\web\bench_plotly_A1_throughput.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_PLOTLY scripts\web\bench_plotly_A2_cadenced.py %%S
+  if errorlevel 1 goto fail
 
   call :run_tffr VIS_D3_CANVAS scripts\web\gen_d3_html.py %%S
+  if errorlevel 1 goto fail
   call :run_a1 VIS_D3_CANVAS scripts\web\gen_d3_html.py %%S
+  if errorlevel 1 goto fail
   call :run_a2 VIS_D3_CANVAS scripts\web\gen_d3_html.py %%S
+  if errorlevel 1 goto fail
 )
 
 echo Smoke outputs complete.
 exit /b 0
+
+:fail
+echo.
+echo Smoke run failed with exit code %ERRORLEVEL%.
+echo If you double-clicked the batch file, this pause keeps the window open.
+pause
+exit /b %ERRORLEVEL%
 
 :run_tffr
 set "TOOL=%~1"
