@@ -2,14 +2,22 @@
 
 A minimal, reproducible folder structure for EEG benchmarking scripts with consistent outputs.
 
+## At a glance
+
+- Formats: EDF + NWB
+- Bench phases: IO, TFFR, A1 (throughput), A2 (cadenced)
+- Interaction windows: 60 / 600 / 1800 s
+- Channel counts: 8 / 16 / 32 / 64
+- Tool targets: desktop + browser
+
 ## Preconditions
 
-- Put EDF files under `./data/` (this pack does not ship data).
+- Put EDF/NWB files under `./data/` (this pack does not ship data).
 - Run commands from the project root (so `benchkit` imports resolve).
 
-## PyQtGraph A1/A2 hang repro + fix note
+## Known issue note (PyQtGraph A1/A2)
 
-**What was happening:** PyQtGraph A1/A2 could appear to stall during pan/zoom sequences if the UI stopped emitting paint events; the job would keep running without output, and the orchestrator would wait indefinitely.  
+**What was happening:** PyQtGraph A1/A2 could appear to stall during pan/zoom sequences if the UI stopped emitting paint events; the job would keep running without output, and the orchestrator would wait indefinitely.
 **What changed:** A1/A2 now log each phase, emit a 1s heartbeat, enforce per-step and per-run timeouts, and `run_all.py` will terminate jobs that stop emitting output (with a tail snippet for debugging). A1/A2 treat zoom saturation as a NOOP step so ZOOM_IN/ZOOM_OUT runs complete without timing out when the range stops changing.
 
 Minimal repro command (single job, ZOOM_IN). Replace `__DATA_FILE__` with your EDF path:
@@ -22,9 +30,7 @@ python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "
 python scripts\desktop\bench_pyqtgraph_A1_throughput_v2.py --format EDF --file "__DATA_FILE__" --tag repro --window-s 60 --load-duration-s 60 --n-ch 8 --sequence ZOOM_IN --steps 60
 ```
 
-## Quick commands
-
-## Quick setup (Windows PowerShell copy/paste)
+## Quick start (Windows PowerShell)
 
 Replace the placeholders once (Ctrl+H):
 - `__DATA_FILE__` → full path to your EDF/NWB file
@@ -70,7 +76,7 @@ foreach ($w in $WINDOWS) {
 }
 ```
 
-## Quick setup (Windows cmd.exe copy/paste)
+## Quick start (Windows cmd.exe)
 
 Replace the placeholders once (Ctrl+H):
 - `__DATA_FILE__` → full path to your EDF/NWB file
@@ -112,6 +118,8 @@ for %%w in (60 600 1800) do (
 )
 ```
 
+## Focused single-bench commands
+
 ### IO (EDF)
 ```bash
 python -m scripts.io.bench_io --data-dir data --n-files 5 --runs 5 --windows 60,600,1800 --n-channels 64 --tag edf_io
@@ -145,7 +153,7 @@ Optional headless capture (requires Playwright):
 python -m scripts.web.collect_plotly_console_playwright --html outputs/A2_CADENCED/VIS_PLOTLY/edf_A2/plotly_A2_interactions.html
 ```
 
-## Output locations
+## Outputs
 
 All outputs are written under `./outputs/<BENCH_ID>/<TOOL_ID>/<TAG>/`.
 
@@ -170,7 +178,7 @@ Recommended `--fs-hz` defaults:
 - 250 Hz keeps file sizes reasonable for 64 channels × 30 minutes.
 - Higher sampling rates scale file size and generation time linearly.
 
-## Lexicon and status
+## Docs
 
 See:
 - `docs/LEXICON.md`
