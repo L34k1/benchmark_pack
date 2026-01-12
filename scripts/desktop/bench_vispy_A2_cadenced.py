@@ -225,14 +225,60 @@ def main() -> None:
     while last_presented_id < (len(ranges) - 1) and (time.time() - t0) < 10.0:
         app.process_events()
 
+    presented_lookup = {
+        pid: (presented_at_ms[idx], latency_ms[idx], lateness_ms[idx], dropped_before[idx])
+        for idx, pid in enumerate(presented_id)
+    }
+
     steps_csv = out / "steps.csv"
     with steps_csv.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(
-            ["presented_step_id", "scheduled_ms", "issued_ms", "presented_ms", "latency_ms", "lateness_ms", "dropped_before"]
+            [
+                "step_idx",
+                "scheduled_ms",
+                "issued_ms",
+                "presented_ms",
+                "latency_ms",
+                "lateness_ms",
+                "issue_late_ms",
+                "dropped_before",
+                "was_dropped",
+            ]
         )
-        for pid, tp, lat, late, drop in zip(presented_id, presented_at_ms, latency_ms, lateness_ms, dropped_before):
-            w.writerow([pid, f"{scheduled_ms[pid]:.3f}", f"{issued_ms[pid]:.3f}", f"{tp:.3f}", f"{lat:.3f}", f"{late:.3f}", drop])
+        for step_idx in range(len(ranges)):
+            scheduled = scheduled_ms[step_idx] if step_idx < len(scheduled_ms) else float("nan")
+            issued = issued_ms[step_idx] if step_idx < len(issued_ms) else float("nan")
+            issue_late = issued - scheduled if issued == issued and scheduled == scheduled else float("nan")
+            if step_idx in presented_lookup:
+                presented, latency, late, drop = presented_lookup[step_idx]
+                w.writerow(
+                    [
+                        step_idx,
+                        f"{scheduled:.3f}",
+                        f"{issued:.3f}",
+                        f"{presented:.3f}",
+                        f"{latency:.3f}",
+                        f"{late:.3f}",
+                        f"{issue_late:.3f}",
+                        drop,
+                        0,
+                    ]
+                )
+            else:
+                w.writerow(
+                    [
+                        step_idx,
+                        f"{scheduled:.3f}" if scheduled == scheduled else "",
+                        f"{issued:.3f}" if issued == issued else "",
+                        "",
+                        "",
+                        "",
+                        f"{issue_late:.3f}" if issue_late == issue_late else "",
+                        "",
+                        1,
+                    ]
+                )
 
     summary_lat = summarize_latency_ms(latency_ms)
     summary = dict(summary_lat)

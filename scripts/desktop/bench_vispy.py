@@ -387,7 +387,7 @@ def run_interactions_one(
         matched = pending[-1]
         after: List[Cmd] = []
 
-        if bench_id == BENCH_A2 and dropped:
+        if dropped:
             for d in dropped:
                 results.append(
                     {
@@ -400,7 +400,7 @@ def run_interactions_one(
                         "latency_ms": float("nan"),
                         "was_dropped": 1,
                         "dropped_before": None,
-                        "issue_late_ms": (d.t_cmd_s - d.t_sched_s) * 1000.0,
+                        "issue_late_ms": (d.t_cmd_s - d.t_sched_s) * 1000.0 if bench_id == BENCH_A2 else float("nan"),
                     }
                 )
 
@@ -417,7 +417,7 @@ def run_interactions_one(
                 "latency_ms": (t_paint - matched.t_cmd_s) * 1000.0,
                 "was_dropped": 0,
                 "dropped_before": len(dropped),
-                "issue_late_ms": (matched.t_cmd_s - matched.t_sched_s) * 1000.0,
+                "issue_late_ms": (matched.t_cmd_s - matched.t_sched_s) * 1000.0 if bench_id == BENCH_A2 else float("nan"),
             }
         )
 
@@ -473,6 +473,45 @@ def run_interactions_one(
 
     pump_timer = visapp.Timer(interval=0.01, connect=pump, start=True)
     visapp.run()
+
+    if pending:
+        for d in pending:
+            results.append(
+                {
+                    "step_idx": d.step_idx,
+                    "x0": d.x0,
+                    "x1": d.x1,
+                    "t_sched_s": d.t_sched_s,
+                    "t_cmd_s": d.t_cmd_s,
+                    "t_paint_s": float("nan"),
+                    "latency_ms": float("nan"),
+                    "was_dropped": 1,
+                    "dropped_before": None,
+                    "issue_late_ms": (d.t_cmd_s - d.t_sched_s) * 1000.0 if bench_id == BENCH_A2 else float("nan"),
+                }
+            )
+
+    if len(results) < len(ranges):
+        seen = {row["step_idx"] for row in results}
+        for step_idx in range(len(ranges)):
+            if step_idx in seen:
+                continue
+            x0, x1 = ranges[step_idx]
+            sched = t_start + (step_idx * interval_s if bench_id == BENCH_A2 else 0.0)
+            results.append(
+                {
+                    "step_idx": step_idx,
+                    "x0": x0,
+                    "x1": x1,
+                    "t_sched_s": sched,
+                    "t_cmd_s": float("nan"),
+                    "t_paint_s": float("nan"),
+                    "latency_ms": float("nan"),
+                    "was_dropped": 1,
+                    "dropped_before": None,
+                    "issue_late_ms": float("nan"),
+                }
+            )
 
     # Build rows, including metadata
     rows: List[Dict[str, Any]] = []
