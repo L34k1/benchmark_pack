@@ -20,6 +20,11 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 call "%VENV_DIR%\Scripts\activate.bat"
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
+%PYTHON% -m pip install --upgrade pip
+if exist "scripts\desktop\requirements-desktop.txt" (
+  %PYTHON% -m pip install -r "scripts\desktop\requirements-desktop.txt"
+)
+
 %PYTHON% scripts\data\gen_synth_one.py --format %FORMAT% %*
 if errorlevel 1 (
   echo.

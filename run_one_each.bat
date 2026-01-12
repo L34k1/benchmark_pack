@@ -12,6 +12,15 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 call "%VENV_DIR%\Scripts\activate.bat"
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
+%PYTHON% -m pip install --upgrade pip
+if exist "scripts\desktop\requirements-desktop.txt" (
+  %PYTHON% -m pip install -r "scripts\desktop\requirements-desktop.txt"
+)
+if exist "scripts\web\requirements-web.txt" (
+  %PYTHON% -m pip install -r "scripts\web\requirements-web.txt"
+  %PYTHON% -m playwright install chromium
+)
+
 REM Run one of each bench with a 1800s window and 64 channels.
 REM Update DATA_FILE (and DATA_DIR if needed) to point at a real EDF/NWB file.
 set DATA_DIR=data
@@ -56,8 +65,8 @@ echo === Desktop benches ===
 %PYTHON% scripts\desktop\bench_datoviz.py --bench-id A2 --format %FORMAT% --file "%DATA_FILE%" --tag %TAG% --window-s 1800 --n-ch 64 --runs 1
 
 echo === Web benches (HTML generation) ===
-%PYTHON% scripts\web\bench_plotly_A1_throughput.py --format %FORMAT% --file "%DATA_FILE%" --tag %TAG% --window-s 1800 --n-channels 64
-%PYTHON% scripts\web\bench_plotly_A2_cadenced.py --format %FORMAT% --file "%DATA_FILE%" --tag %TAG% --window-s 1800 --n-channels 64
+%PYTHON% scripts\web\bench_plotly_A1_throughput.py --format %FORMAT% --file "%DATA_FILE%" --tag %TAG% --window-s 1800 --n-channels 64 --no-collect
+%PYTHON% scripts\web\bench_plotly_A2_cadenced.py --format %FORMAT% --file "%DATA_FILE%" --tag %TAG% --window-s 1800 --n-channels 64 --no-collect
 
 endlocal
 pause

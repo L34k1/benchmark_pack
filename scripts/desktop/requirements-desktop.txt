@@ -6,3 +6,5 @@ vispy
 pyqtgraph
 PyQt5
 datoviz
+mne
+fastplotlib

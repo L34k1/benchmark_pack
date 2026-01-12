@@ -12,6 +12,15 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 call "%VENV_DIR%\Scripts\activate.bat"
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
+%PYTHON% -m pip install --upgrade pip
+if exist "scripts\desktop\requirements-desktop.txt" (
+  %PYTHON% -m pip install -r "scripts\desktop\requirements-desktop.txt"
+)
+if exist "scripts\web\requirements-web.txt" (
+  %PYTHON% -m pip install -r "scripts\web\requirements-web.txt"
+  %PYTHON% -m playwright install chromium
+)
+
 call gen_synth_one.bat EDF
 if errorlevel 1 goto fail
 

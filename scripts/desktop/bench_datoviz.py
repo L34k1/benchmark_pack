@@ -80,7 +80,8 @@ def _dv_app(dv: Any) -> Any:
     app_fn = getattr(dv, "app", None)
     if app_fn is None:
         return None
-    if isinstance(app_fn, ctypes._FuncPtr):
+    func_base = getattr(ctypes, "_CFuncPtr", ctypes._FuncPtr)
+    if isinstance(app_fn, func_base):
         for candidate in (None, 0, 1):
             try:
                 if candidate is None:

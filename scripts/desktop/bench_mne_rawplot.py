@@ -184,6 +184,11 @@ def main() -> None:
         extra={"format": args.format},
     )
 
+    import importlib.util
+
+    if importlib.util.find_spec("mne") is None:
+        print("SKIP_UNSUPPORTED_FORMAT")
+        raise SystemExit(2)
     import mne
     from PyQt5 import QtWidgets
 
