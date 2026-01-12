@@ -211,12 +211,30 @@ def main() -> None:
     while last_presented_id < (len(ranges) - 1) and (time.time() - t0) < 10.0:
         app.process_events()
 
+    presented_lookup = {
+        pid: (presented_at_ms[idx], latency_ms[idx], dropped_before[idx]) for idx, pid in enumerate(presented_id)
+    }
+
     steps_csv = out / "steps.csv"
     with steps_csv.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["presented_step_id", "issued_ms", "presented_ms", "latency_ms", "dropped_before"])
-        for pid, tp, lat, drop in zip(presented_id, presented_at_ms, latency_ms, dropped_before):
-            w.writerow([pid, f"{issued_ms[pid]:.3f}", f"{tp:.3f}", f"{lat:.3f}", drop])
+        w.writerow(
+            [
+                "step_idx",
+                "issued_ms",
+                "presented_ms",
+                "latency_ms",
+                "dropped_before",
+                "was_dropped",
+            ]
+        )
+        for step_idx in range(len(ranges)):
+            issued = issued_ms[step_idx] if step_idx < len(issued_ms) else float("nan")
+            if step_idx in presented_lookup:
+                presented, latency, drop = presented_lookup[step_idx]
+                w.writerow([step_idx, f"{issued:.3f}", f"{presented:.3f}", f"{latency:.3f}", drop, 0])
+            else:
+                w.writerow([step_idx, f"{issued:.3f}" if issued == issued else "", "", "", "", 1])
 
     summary = summarize_latency_ms(latency_ms)
     total_time_s = (
