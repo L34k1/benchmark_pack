@@ -17,6 +17,7 @@ Outputs (per bench):
 from __future__ import annotations
 
 import argparse
+import ctypes
 import inspect
 import sys
 import threading
@@ -72,6 +73,15 @@ def _dv_app(dv: Any) -> Any:
     app_fn = getattr(dv, "app", None)
     if app_fn is None:
         return None
+    if isinstance(app_fn, ctypes._FuncPtr):
+        for candidate in (None, 0, 1):
+            try:
+                if candidate is None:
+                    return app_fn()
+                return app_fn(candidate)
+            except (TypeError, ctypes.ArgumentError):
+                continue
+        return None
     try:
         return app_fn()
     except TypeError:
@@ -86,13 +96,13 @@ def _dv_app(dv: Any) -> Any:
             for candidate in ("glfw", "default", "headless"):
                 try:
                     return app_fn(candidate)
-                except TypeError:
+                except (TypeError, ctypes.ArgumentError):
                     continue
     except (TypeError, ValueError):
         for candidate in ("glfw", "default", "headless"):
             try:
                 return app_fn(candidate)
-            except TypeError:
+            except (TypeError, ctypes.ArgumentError):
                 continue
     return None
 

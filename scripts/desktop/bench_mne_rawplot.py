@@ -115,15 +115,24 @@ def load_segment(args: argparse.Namespace) -> Tuple[float, float]:
     return float(seg.times_s[0]), float(seg.times_s[-1])
 
 
-def set_time_range(plotter: Any, tmin: float, tmax: float) -> None:
+def set_time_range(plotter: Any, tmin: float, tmax: float) -> bool:
     if hasattr(plotter, "set_time_range"):
         plotter.set_time_range(tmin, tmax)
-    elif hasattr(plotter, "_set_time_range"):
+        return True
+    if hasattr(plotter, "_set_time_range"):
         plotter._set_time_range(tmin, tmax)
-    elif hasattr(plotter, "_update_time_slider"):
+        return True
+    if hasattr(plotter, "_update_time_slider"):
         plotter._update_time_slider(tmin)
-    else:
-        raise AttributeError("RawPlotter does not expose a time range setter.")
+        return True
+    slider = getattr(plotter, "time_slider", None) or getattr(plotter, "_time_slider", None)
+    if slider is not None and hasattr(slider, "setValue"):
+        try:
+            slider.setValue(tmin)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def main() -> None:
@@ -181,7 +190,9 @@ def main() -> None:
             while time.perf_counter() < target:
                 app.processEvents()
         t_issue = time.perf_counter()
-        set_time_range(plotter, x0, x1)
+        if not set_time_range(plotter, x0, x1):
+            print("RawPlotter does not expose a time range setter; skipping interaction benchmark.")
+            return
         app.processEvents()
         t_paint = time.perf_counter()
         lat_ms.append((t_paint - t_issue) * 1000.0)
