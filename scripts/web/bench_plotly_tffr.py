@@ -23,6 +23,7 @@ import sys
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -32,10 +33,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchkit.common import out_dir, write_manifest
-from benchkit.bench_defaults import DEFAULT_WINDOW_S
-from benchkit.lexicon import BENCH_TFFR, FMT_EDF, FMT_NWB, TOOL_PLOTLY, OVL_OFF, CACHE_WARM
+from benchkit.common import out_dir
+from benchkit.bench_defaults import DEFAULT_STEPS, DEFAULT_WINDOW_S
+from benchkit.lexicon import BENCH_TFFR, FMT_EDF, FMT_NWB, TOOL_PLOTLY, OVL_OFF, CACHE_WARM, SEQ_PAN
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
+from benchkit.output_contract import (
+    write_manifest_contract,
+    write_tffr_csv,
+    write_tffr_summary,
+)
 
 
 def load_window(
@@ -140,6 +146,15 @@ const config = {{
     out_html.write_text(html, encoding="utf-8")
 
 
+def collect_bench_json(html_path: Path, out_json: Path) -> dict:
+    script = REPO_ROOT / "scripts" / "web" / "collect_plotly_console_playwright_v2.py"
+    subprocess.run(
+        [sys.executable, str(script), "--html", str(html_path), "--out", str(out_json)],
+        check=True,
+    )
+    return json.loads(out_json.read_text(encoding="utf-8"))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", type=Path, default=Path("data"))
@@ -148,11 +163,15 @@ def main() -> None:
     ap.add_argument("--file", type=Path, default=None, help="Full path to EDF/NWB file.")
     ap.add_argument("--n-channels", "--n-ch", dest="n_channels", type=int, default=8)
     ap.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
+    ap.add_argument("--sequence", choices=[SEQ_PAN], default=SEQ_PAN)
+    ap.add_argument("--steps", type=int, default=DEFAULT_STEPS)
+    ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--max-points-per-trace", type=int, default=20000)
     ap.add_argument("--out-root", type=Path, default=Path("outputs"))
     ap.add_argument("--tag", type=str, default="edf_tffr")
     ap.add_argument("--overlay-state", "--overlay", dest="overlay_state", type=str, default=OVL_OFF)
     ap.add_argument("--cache-state", type=str, default=CACHE_WARM)
+    ap.add_argument("--no-collect", action="store_true", help="Skip Playwright collection step.")
     ap.add_argument("--nwb-series-path", type=str, default=None)
     ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
@@ -163,8 +182,10 @@ def main() -> None:
     if not data_path.exists():
         raise FileNotFoundError(data_path)
 
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out_base = out_dir(args.out_root, BENCH_TFFR, TOOL_PLOTLY, args.tag)
-    write_manifest(out_base, BENCH_TFFR, TOOL_PLOTLY, vars(args), extra={"format": args.format})
     out_html = out_base / "plotly_tffr.html"
 
     times, data, fs, n_ch, decim = load_window(
@@ -191,8 +212,37 @@ def main() -> None:
         "overlay_state": args.overlay_state,
         "cache_state": args.cache_state,
     }
+    write_manifest_contract(
+        out_base,
+        bench_id=BENCH_TFFR,
+        tool_id=TOOL_PLOTLY,
+        fmt=args.format,
+        file_path=data_path,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_channels),
+        sequence=args.sequence,
+        overlay=args.overlay_state,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"cache_state": args.cache_state},
+    )
     write_html(out_html, times, data, meta)
-    print(f"Wrote {out_html}. Open it and copy the console line starting with BENCH_JSON.")  # noqa: T201
+    if args.no_collect:
+        print(f"Wrote {out_html}. Open it and copy the console line starting with BENCH_JSON.")  # noqa: T201
+        return
+    bench_json = collect_bench_json(out_html, out_base / "bench.json")
+    tffr_ms = float(bench_json.get("first_render_ms", float("nan")))
+    write_tffr_csv(out_base, run_id=0, tffr_ms=tffr_ms)
+    write_tffr_summary(
+        out_base,
+        bench_id=BENCH_TFFR,
+        tool_id=TOOL_PLOTLY,
+        fmt=args.format,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_channels),
+        tffr_ms=tffr_ms,
+        extra={"overlay": args.overlay_state, "meta": bench_json.get("meta")},
+    )
 
 
 if __name__ == "__main__":

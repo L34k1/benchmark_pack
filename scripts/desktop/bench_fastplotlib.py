@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchkit.common import out_dir, write_json, write_manifest
+from benchkit.common import out_dir
 from benchkit.bench_defaults import (
     DEFAULT_STEPS,
     DEFAULT_TARGET_INTERVAL_MS,
@@ -41,6 +41,14 @@ from benchkit.lexicon import (
     TOOL_FASTPLOTLIB,
 )
 from benchkit.loaders import load_edf_segment_pyedflib, load_nwb_segment_pynwb
+from benchkit.output_contract import (
+    steps_from_latencies,
+    write_manifest_contract,
+    write_steps_csv,
+    write_steps_summary,
+    write_tffr_csv,
+    write_tffr_summary,
+)
 
 
 def normalize_bench_id(bench_id: str) -> str:
@@ -128,6 +136,7 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     ap.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     ap.add_argument("--target-interval-ms", type=float, default=DEFAULT_TARGET_INTERVAL_MS)
+    ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--n-ch", type=int, default=16)
     ap.add_argument("--load-start-s", type=float, default=0.0)
     ap.add_argument("--load-duration-s", type=float, default=None)
@@ -138,8 +147,24 @@ def main() -> None:
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out = out_dir(args.out_root, args.bench_id, TOOL_FASTPLOTLIB, args.tag)
-    write_manifest(out, args.bench_id, TOOL_FASTPLOTLIB, args=vars(args), extra={"format": args.format})
+    write_manifest_contract(
+        out,
+        bench_id=args.bench_id,
+        tool_id=TOOL_FASTPLOTLIB,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=None,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"format": args.format},
+    )
 
     try:
         import fastplotlib as fpl
@@ -157,7 +182,17 @@ def main() -> None:
     tffr_s = time.perf_counter() - t0
 
     if args.bench_id == BENCH_TFFR:
-        write_json(out / "summary.json", {"bench_id": BENCH_TFFR, "tool_id": TOOL_FASTPLOTLIB, "tffr_s": tffr_s})
+        tffr_ms = float(tffr_s) * 1000.0
+        write_tffr_csv(out, run_id=0, tffr_ms=tffr_ms)
+        write_tffr_summary(
+            out,
+            bench_id=BENCH_TFFR,
+            tool_id=TOOL_FASTPLOTLIB,
+            fmt=args.format,
+            window_s=float(args.window_s),
+            n_channels=int(args.n_ch),
+            tffr_ms=tffr_ms,
+        )
         return
 
     lo, hi = float(t[0]), float(t[-1])
@@ -177,13 +212,17 @@ def main() -> None:
         t_paint = time.perf_counter()
         lat_ms.append((t_paint - t_issue) * 1000.0)
 
-    write_json(
-        out / "summary.json",
-        {
+    steps_rows = steps_from_latencies(lat_ms, steps_target=int(args.steps))
+    write_steps_csv(out, steps_rows)
+    write_steps_summary(
+        out,
+        steps_rows,
+        extra={
             "bench_id": args.bench_id,
             "tool_id": TOOL_FASTPLOTLIB,
             "sequence": args.sequence,
             "steps": int(args.steps),
+            "target_interval_ms": float(args.target_interval_ms),
             "latency_ms_mean": float(sum(lat_ms) / max(1, len(lat_ms))),
         },
     )

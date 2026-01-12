@@ -15,10 +15,19 @@ if str(REPO_ROOT) not in sys.path:
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 
-from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.common import ensure_dir, env_info, out_dir
 from benchkit.bench_defaults import DEFAULT_WINDOW_S, default_load_duration_s
-from benchkit.lexicon import BENCH_TFFR, FMT_EDF, FMT_NWB, OVL_OFF, OVL_ON, TOOL_PG
+from benchkit.lexicon import (
+    BENCH_TFFR,
+    FMT_EDF,
+    FMT_NWB,
+    OVL_OFF,
+    OVL_ON,
+    SEQ_PAN,
+    TOOL_PG,
+)
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
+from benchkit.output_contract import write_manifest_contract, write_tffr_csv, write_tffr_summary
 
 
 def _now_ms() -> float:
@@ -74,6 +83,9 @@ def main() -> None:
     p.add_argument("--load-duration-s", type=float, default=None)
     p.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     p.add_argument("--max-points-per-trace", type=int, default=5000)
+    p.add_argument("--sequence", choices=[SEQ_PAN], default=SEQ_PAN)
+    p.add_argument("--steps", type=int, default=1)
+    p.add_argument("--runs", type=int, default=1)
 
     p.add_argument("--overlay", choices=[OVL_OFF, OVL_ON], default=OVL_OFF)
 
@@ -85,9 +97,25 @@ def main() -> None:
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out = out_dir(args.out_root, BENCH_TFFR, TOOL_PG, args.tag)
     ensure_dir(out)
-    write_manifest(out, BENCH_TFFR, TOOL_PG, args=vars(args), extra={"env": env_info()})
+    write_manifest_contract(
+        out,
+        bench_id=BENCH_TFFR,
+        tool_id=TOOL_PG,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=args.overlay,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"env": env_info()},
+    )
 
     t, d, fs, meta = _load_segment(args)
 
@@ -118,16 +146,17 @@ def main() -> None:
     end_ms = plot.last_paint_ms
     tffr_ms = float(end_ms - start_ms) if np.isfinite(end_ms) else float("nan")
 
-    write_json(out / "summary.json", {
-        "bench_id": BENCH_TFFR,
-        "tool_id": TOOL_PG,
-        "format": args.format,
-        "overlay": args.overlay,
-        "window_s": float(args.window_s),
-        "n_ch": int(args.n_ch),
-        "tffr_ms": tffr_ms,
-        "meta": meta,
-    })
+    write_tffr_csv(out, run_id=0, tffr_ms=tffr_ms)
+    write_tffr_summary(
+        out,
+        bench_id=BENCH_TFFR,
+        tool_id=TOOL_PG,
+        fmt=args.format,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        tffr_ms=tffr_ms,
+        extra={"overlay": args.overlay, "meta": meta},
+    )
 
     if args.pause_ms > 0:
         QtCore.QTimer.singleShot(int(args.pause_ms), app.quit)
