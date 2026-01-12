@@ -43,6 +43,14 @@ from benchkit.lexicon import (
 from benchkit.loaders import load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
 
+def normalize_bench_id(bench_id: str) -> str:
+    if bench_id == "A1":
+        return BENCH_A1
+    if bench_id == "A2":
+        return BENCH_A2
+    return bench_id
+
+
 def clamp_range(x0: float, x1: float, lo: float, hi: float) -> Tuple[float, float]:
     w = x1 - x0
     if w <= 0:
@@ -120,7 +128,7 @@ def set_time_range(plotter: Any, tmin: float, tmax: float) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="MNE Raw.plot benchmark.")
-    ap.add_argument("--bench-id", choices=[BENCH_TFFR, BENCH_A1, BENCH_A2], required=True)
+    ap.add_argument("--bench-id", choices=[BENCH_TFFR, BENCH_A1, BENCH_A2, "A1", "A2"], required=True)
     ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], required=True)
     ap.add_argument("--file", type=Path, required=True)
     ap.add_argument("--out-root", type=Path, default=Path("outputs"))
@@ -135,6 +143,7 @@ def main() -> None:
     ap.add_argument("--nwb-series-path", type=str, default=None)
     ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
+    args.bench_id = normalize_bench_id(args.bench_id)
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
