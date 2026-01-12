@@ -4,10 +4,13 @@ setlocal enabledelayedexpansion
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
-set "PYTHON=python"
-if exist ".venv\Scripts\python.exe" (
-  set "PYTHON=.venv\Scripts\python.exe"
+set "VENV_DIR=.venv"
+if not exist "%VENV_DIR%\Scripts\python.exe" (
+  echo Creating venv...
+  python -m venv "%VENV_DIR%"
 )
+call "%VENV_DIR%\Scripts\activate.bat"
+set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 call gen_synth_one.bat EDF
 if errorlevel 1 goto fail
@@ -71,6 +74,7 @@ for %%S in (PAN ZOOM_IN PAN_ZOOM) do (
 )
 
 echo Smoke outputs complete.
+pause
 exit /b 0
 
 :fail

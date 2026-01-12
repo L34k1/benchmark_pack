@@ -12,10 +12,13 @@ if "%~1"=="" (
 set "FORMAT=%~1"
 shift
 
-set "PYTHON=python"
-if exist ".venv\Scripts\python.exe" (
-  set "PYTHON=.venv\Scripts\python.exe"
+set "VENV_DIR=.venv"
+if not exist "%VENV_DIR%\Scripts\python.exe" (
+  echo Creating venv...
+  python -m venv "%VENV_DIR%"
 )
+call "%VENV_DIR%\Scripts\activate.bat"
+set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 %PYTHON% scripts\data\gen_synth_one.py --format %FORMAT% %*
 if errorlevel 1 (
@@ -25,4 +28,7 @@ if errorlevel 1 (
   pause
   exit /b %ERRORLEVEL%
 )
+echo.
+echo gen_synth_one completed.
+pause
 exit /b 0

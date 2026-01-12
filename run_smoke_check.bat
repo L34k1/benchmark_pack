@@ -10,6 +10,7 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
   python -m venv "%VENV_DIR%"
 )
 
+call "%VENV_DIR%\Scripts\activate.bat"
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 set "LOG_DIR=%ROOT%"
@@ -22,4 +23,5 @@ echo Running smoke check... > "%LOG_PATH%"
 set "EXITCODE=%ERRORLEVEL%"
 echo Log saved to "%LOG_PATH%"
 
+pause
 exit /b %EXITCODE%
