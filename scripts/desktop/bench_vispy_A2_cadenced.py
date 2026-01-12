@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 
 import argparse
-import csv
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -15,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.common import ensure_dir, env_info, out_dir
 from benchkit.bench_defaults import (
     DEFAULT_STEPS,
     DEFAULT_TARGET_INTERVAL_MS,
@@ -38,7 +37,7 @@ from benchkit.lexicon import (
     SEQ_PAN_ZOOM,
 )
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
-from benchkit.stats import summarize_latency_ms
+from benchkit.output_contract import write_manifest_contract, write_steps_csv, write_steps_summary
 
 
 def now_ms() -> float:
@@ -129,6 +128,7 @@ def main() -> None:
 
     p.add_argument("--sequence", choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM], default=SEQ_PAN_ZOOM)
     p.add_argument("--steps", type=int, default=DEFAULT_STEPS)
+    p.add_argument("--runs", type=int, default=1)
     p.add_argument("--target-interval-ms", type=float, default=DEFAULT_TARGET_INTERVAL_MS)
 
     p.add_argument("--n-ch", type=int, default=16)
@@ -144,9 +144,25 @@ def main() -> None:
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out = out_dir(args.out_root, BENCH_A2, TOOL_VISPY, args.tag)
     ensure_dir(out)
-    write_manifest(out, BENCH_A2, TOOL_VISPY, args=vars(args), extra={"env": env_info()})
+    write_manifest_contract(
+        out,
+        bench_id=BENCH_A2,
+        tool_id=TOOL_VISPY,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=args.overlay,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"env": env_info()},
+    )
 
     t, d, meta = load_segment(args)
 
@@ -230,61 +246,61 @@ def main() -> None:
         for idx, pid in enumerate(presented_id)
     }
 
-    steps_csv = out / "steps.csv"
-    with steps_csv.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(
-            [
-                "step_idx",
-                "scheduled_ms",
-                "issued_ms",
-                "presented_ms",
-                "latency_ms",
-                "lateness_ms",
-                "issue_late_ms",
-                "dropped_before",
-                "was_dropped",
-            ]
-        )
-        for step_idx in range(len(ranges)):
-            scheduled = scheduled_ms[step_idx] if step_idx < len(scheduled_ms) else float("nan")
-            issued = issued_ms[step_idx] if step_idx < len(issued_ms) else float("nan")
-            issue_late = issued - scheduled if issued == issued and scheduled == scheduled else float("nan")
-            if step_idx in presented_lookup:
-                presented, latency, late, drop = presented_lookup[step_idx]
-                w.writerow(
-                    [
-                        step_idx,
-                        f"{scheduled:.3f}",
-                        f"{issued:.3f}",
-                        f"{presented:.3f}",
-                        f"{latency:.3f}",
-                        f"{late:.3f}",
-                        f"{issue_late:.3f}",
-                        drop,
-                        0,
-                    ]
-                )
-            else:
-                w.writerow(
-                    [
-                        step_idx,
-                        f"{scheduled:.3f}" if scheduled == scheduled else "",
-                        f"{issued:.3f}" if issued == issued else "",
-                        "",
-                        "",
-                        "",
-                        f"{issue_late:.3f}" if issue_late == issue_late else "",
-                        "",
-                        1,
-                    ]
-                )
+    steps_rows: List[Dict[str, Any]] = []
+    for step_idx in range(len(ranges)):
+        scheduled = scheduled_ms[step_idx] if step_idx < len(scheduled_ms) else float("nan")
+        issued = issued_ms[step_idx] if step_idx < len(issued_ms) else float("nan")
+        issue_late = issued - scheduled if issued == issued and scheduled == scheduled else float("nan")
+        if step_idx in presented_lookup:
+            presented, latency, late, drop = presented_lookup[step_idx]
+            steps_rows.append(
+                {
+                    "step_id": step_idx,
+                    "latency_ms": float(latency),
+                    "noop": False,
+                    "status": "OK",
+                    "scheduled_ms": float(scheduled),
+                    "issued_ms": float(issued),
+                    "presented_ms": float(presented),
+                    "lateness_ms": float(late),
+                    "issue_late_ms": float(issue_late),
+                    "dropped_before": int(drop),
+                    "was_dropped": 0,
+                }
+            )
+        else:
+            steps_rows.append(
+                {
+                    "step_id": step_idx,
+                    "latency_ms": 0.0,
+                    "noop": False,
+                    "status": "FAIL",
+                    "scheduled_ms": float(scheduled),
+                    "issued_ms": float(issued),
+                    "presented_ms": float("nan"),
+                    "lateness_ms": float("nan"),
+                    "issue_late_ms": float(issue_late),
+                    "dropped_before": None,
+                    "was_dropped": 1,
+                }
+            )
 
-    summary_lat = summarize_latency_ms(latency_ms)
-    summary = dict(summary_lat)
+    write_steps_csv(out, steps_rows)
+    summary_extra: Dict[str, Any] = {
+        "bench_id": BENCH_A2,
+        "tool_id": TOOL_VISPY,
+        "format": args.format,
+        "sequence": args.sequence,
+        "overlay": args.overlay,
+        "window_s": float(args.window_s),
+        "steps_issued": int(args.steps),
+        "frames_presented": int(len(presented_id)),
+        "target_interval_ms": float(args.target_interval_ms),
+        "meta": meta,
+    }
     if lateness_ms:
         a = np.asarray(lateness_ms, dtype=float)
-        summary.update(
+        summary_extra.update(
             {
                 "lateness_p50_ms": float(np.percentile(a, 50)),
                 "lateness_p95_ms": float(np.percentile(a, 95)),
@@ -292,22 +308,7 @@ def main() -> None:
             }
         )
 
-    write_json(
-        out / "summary.json",
-        {
-            "bench_id": BENCH_A2,
-            "tool_id": TOOL_VISPY,
-            "format": args.format,
-            "sequence": args.sequence,
-            "overlay": args.overlay,
-            "window_s": float(args.window_s),
-            "steps_issued": int(args.steps),
-            "frames_presented": int(len(presented_id)),
-            "target_interval_ms": float(args.target_interval_ms),
-            **summary,
-            "meta": meta,
-        },
-    )
+    write_steps_summary(out, steps_rows, extra=summary_extra)
 
     canvas.close()
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 
 import argparse
-import csv
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -16,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 
-from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.common import ensure_dir, env_info, out_dir
 from benchkit.bench_defaults import (
     DEFAULT_STEPS,
     DEFAULT_WINDOW_S,
@@ -30,7 +29,7 @@ from benchkit.lexicon import (
     SEQ_PAN, SEQ_PAN_ZOOM, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, TOOL_PG
 )
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
-from benchkit.stats import summarize_latency_ms
+from benchkit.output_contract import write_manifest_contract, write_steps_csv, write_steps_summary
 
 
 def _now_ms() -> float:
@@ -162,6 +161,7 @@ def main() -> None:
 
     p.add_argument("--sequence", choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM], default=SEQ_PAN_ZOOM)
     p.add_argument("--steps", type=int, default=DEFAULT_STEPS)
+    p.add_argument("--runs", type=int, default=1)
 
     p.add_argument("--n-ch", type=int, default=16)
     p.add_argument("--load-start-s", type=float, default=0.0)
@@ -185,9 +185,25 @@ def main() -> None:
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
+    if args.runs != 1:
+        _log(f"config=force_runs value=1 requested={args.runs}")
+        args.runs = 1
     out = out_dir(args.out_root, BENCH_A1, TOOL_PG, args.tag)
     ensure_dir(out)
-    write_manifest(out, BENCH_A1, TOOL_PG, args=vars(args), extra={"env": env_info()})
+    write_manifest_contract(
+        out,
+        bench_id=BENCH_A1,
+        tool_id=TOOL_PG,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=args.overlay,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"env": env_info()},
+    )
 
     _log("phase=load_start")
     t, d, meta = _load_segment(args)
@@ -251,56 +267,40 @@ def main() -> None:
 
     def finalize() -> None:
         _log("phase=finalize_start")
-        steps_csv = out / "steps.csv"
-        with steps_csv.open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(
-                [
-                    "step_id",
-                    "status",
-                    "noop",
-                    "latency_ms",
-                    "xmin",
-                    "xmax",
-                    "span",
-                    "paint_delta",
-                    "range_signal",
-                ]
-            )
-            for row in steps_rows:
-                w.writerow(
-                    [
-                        row["step_id"],
-                        row["status"],
-                        row["noop"],
-                        f"{row['latency_ms']:.3f}",
-                        f"{row['xmin']:.6f}",
-                        f"{row['xmax']:.6f}",
-                        f"{row['span']:.6f}",
-                        row["paint_delta"],
-                        row["range_signal"],
-                    ]
-                )
-
-        lat_ms = [row["latency_ms"] for row in steps_rows if row["status"] == "OK"]
-        summary = summarize_latency_ms(lat_ms)
-        summary.update({
-            "bench_id": BENCH_A1,
-            "tool_id": TOOL_PG,
-            "format": args.format,
-            "sequence": args.sequence,
-            "overlay": args.overlay,
-            "window_s": float(args.window_s),
-            "steps": int(args.steps),
-            "requested_n_ch": requested_n_ch,
-            "available_n_ch": available_n_ch,
-            "effective_n_ch": effective_n_ch,
-            "fs_hz": float(meta.get("fs_hz", float("nan"))),
-            "total_points_rendered": total_points,
-            "meta": meta,
-        })
-        write_json(out / "summary.json", summary)
-        write_json(out / "latencies_ms.json", {"lat_ms": lat_ms})
+        write_steps_csv(
+            out,
+            steps_rows,
+            fieldnames=[
+                "step_id",
+                "status",
+                "noop",
+                "latency_ms",
+                "xmin",
+                "xmax",
+                "span",
+                "paint_delta",
+                "range_signal",
+            ],
+        )
+        write_steps_summary(
+            out,
+            steps_rows,
+            extra={
+                "bench_id": BENCH_A1,
+                "tool_id": TOOL_PG,
+                "format": args.format,
+                "sequence": args.sequence,
+                "overlay": args.overlay,
+                "window_s": float(args.window_s),
+                "steps": int(args.steps),
+                "requested_n_ch": requested_n_ch,
+                "available_n_ch": available_n_ch,
+                "effective_n_ch": effective_n_ch,
+                "fs_hz": float(meta.get("fs_hz", float("nan"))),
+                "total_points_rendered": total_points,
+                "meta": meta,
+            },
+        )
         _log("phase=finalize_done")
 
     def schedule_next(delay_ms: float = 0.0) -> None:
