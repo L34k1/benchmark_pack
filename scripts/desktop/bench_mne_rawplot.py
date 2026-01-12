@@ -43,6 +43,14 @@ from benchkit.lexicon import (
 from benchkit.loaders import load_edf_segment_pyedflib, load_nwb_segment_pynwb
 
 
+def normalize_bench_id(bench_id: str) -> str:
+    if bench_id == "A1":
+        return BENCH_A1
+    if bench_id == "A2":
+        return BENCH_A2
+    return bench_id
+
+
 def clamp_range(x0: float, x1: float, lo: float, hi: float) -> Tuple[float, float]:
     w = x1 - x0
     if w <= 0:
@@ -107,20 +115,29 @@ def load_segment(args: argparse.Namespace) -> Tuple[float, float]:
     return float(seg.times_s[0]), float(seg.times_s[-1])
 
 
-def set_time_range(plotter: Any, tmin: float, tmax: float) -> None:
+def set_time_range(plotter: Any, tmin: float, tmax: float) -> bool:
     if hasattr(plotter, "set_time_range"):
         plotter.set_time_range(tmin, tmax)
-    elif hasattr(plotter, "_set_time_range"):
+        return True
+    if hasattr(plotter, "_set_time_range"):
         plotter._set_time_range(tmin, tmax)
-    elif hasattr(plotter, "_update_time_slider"):
+        return True
+    if hasattr(plotter, "_update_time_slider"):
         plotter._update_time_slider(tmin)
-    else:
-        raise AttributeError("RawPlotter does not expose a time range setter.")
+        return True
+    slider = getattr(plotter, "time_slider", None) or getattr(plotter, "_time_slider", None)
+    if slider is not None and hasattr(slider, "setValue"):
+        try:
+            slider.setValue(tmin)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="MNE Raw.plot benchmark.")
-    ap.add_argument("--bench-id", choices=[BENCH_TFFR, BENCH_A1, BENCH_A2], required=True)
+    ap.add_argument("--bench-id", choices=[BENCH_TFFR, BENCH_A1, BENCH_A2, "A1", "A2"], required=True)
     ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], required=True)
     ap.add_argument("--file", type=Path, required=True)
     ap.add_argument("--out-root", type=Path, default=Path("outputs"))
@@ -135,6 +152,7 @@ def main() -> None:
     ap.add_argument("--nwb-series-path", type=str, default=None)
     ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
+    args.bench_id = normalize_bench_id(args.bench_id)
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
@@ -172,7 +190,9 @@ def main() -> None:
             while time.perf_counter() < target:
                 app.processEvents()
         t_issue = time.perf_counter()
-        set_time_range(plotter, x0, x1)
+        if not set_time_range(plotter, x0, x1):
+            print("RawPlotter does not expose a time range setter; skipping interaction benchmark.")
+            return
         app.processEvents()
         t_paint = time.perf_counter()
         lat_ms.append((t_paint - t_issue) * 1000.0)

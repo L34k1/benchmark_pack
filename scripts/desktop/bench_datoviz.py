@@ -17,6 +17,8 @@ Outputs (per bench):
 from __future__ import annotations
 
 import argparse
+import ctypes
+import inspect
 import sys
 import threading
 import time
@@ -57,6 +59,52 @@ from benchkit.lexicon import (
     TOOL_DATOVIZ,
 )
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
+
+
+def normalize_bench_id(bench_id: str) -> str:
+    if bench_id == "A1":
+        return BENCH_A1
+    if bench_id == "A2":
+        return BENCH_A2
+    return bench_id
+
+
+def _dv_app(dv: Any) -> Any:
+    app_fn = getattr(dv, "app", None)
+    if app_fn is None:
+        return None
+    if isinstance(app_fn, ctypes._FuncPtr):
+        for candidate in (None, 0, 1):
+            try:
+                if candidate is None:
+                    return app_fn()
+                return app_fn(candidate)
+            except (TypeError, ctypes.ArgumentError):
+                continue
+        return None
+    try:
+        return app_fn()
+    except TypeError:
+        pass
+    try:
+        sig = inspect.signature(app_fn)
+        if any(
+            p.default is inspect.Parameter.empty
+            and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            for p in sig.parameters.values()
+        ):
+            for candidate in ("glfw", "default", "headless"):
+                try:
+                    return app_fn(candidate)
+                except (TypeError, ctypes.ArgumentError):
+                    continue
+    except (TypeError, ValueError):
+        for candidate in ("glfw", "default", "headless"):
+            try:
+                return app_fn(candidate)
+            except (TypeError, ctypes.ArgumentError):
+                continue
+    return None
 
 
 @dataclass
@@ -168,10 +216,9 @@ class DatovizBench:
             return dv_canvas(show=False, size=(width, height))
         except Exception:
             pass
-        if hasattr(self.dv, "app"):
-            app = self.dv.app()
-            if hasattr(app, "canvas"):
-                return app.canvas(show=False, size=(width, height))
+        app = _dv_app(self.dv)
+        if app is not None and hasattr(app, "canvas"):
+            return app.canvas(show=False, size=(width, height))
         if hasattr(self.dv, "Canvas"):
             return self.dv.Canvas(show=False, size=(width, height))
         raise RuntimeError("Datoviz canvas API not found. Install a datoviz build that exposes canvas().")
@@ -297,11 +344,10 @@ def _dv_run(dv: Any) -> None:
     if hasattr(dv, "run"):
         dv.run()
         return
-    if hasattr(dv, "app"):
-        app = dv.app()
-        if hasattr(app, "run"):
-            app.run()
-            return
+    app = _dv_app(dv)
+    if app is not None and hasattr(app, "run"):
+        app.run()
+        return
     raise RuntimeError("Datoviz run() API not found")
 
 
@@ -309,11 +355,10 @@ def _dv_quit(dv: Any) -> None:
     if hasattr(dv, "quit"):
         dv.quit()
         return
-    if hasattr(dv, "app"):
-        app = dv.app()
-        if hasattr(app, "quit"):
-            app.quit()
-            return
+    app = _dv_app(dv)
+    if app is not None and hasattr(app, "quit"):
+        app.quit()
+        return
 
 
 def run_tffr_one(t: np.ndarray, data: np.ndarray, fs: float, args: argparse.Namespace) -> Dict[str, Any]:
@@ -551,7 +596,7 @@ def run_interactions_one(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bench-id", type=str, required=True, choices=[BENCH_TFFR, BENCH_A1, BENCH_A2])
+    ap.add_argument("--bench-id", type=str, required=True, choices=[BENCH_TFFR, BENCH_A1, BENCH_A2, "A1", "A2"])
     ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], required=True)
     ap.add_argument("--file", type=Path, required=True)
     ap.add_argument("--runs", type=int, default=3)
@@ -574,6 +619,7 @@ def main() -> None:
     ap.add_argument("--nwb-series-path", type=str, default=None)
     ap.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     args = ap.parse_args()
+    args.bench_id = normalize_bench_id(args.bench_id)
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
