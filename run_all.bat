@@ -10,6 +10,7 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
   python -m venv "%VENV_DIR%"
 )
 
+call "%VENV_DIR%\Scripts\activate.bat"
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 "%PYTHON%" -m pip install --upgrade pip
@@ -26,4 +27,5 @@ if exist "scripts\web\requirements-web.txt" (
 "%PYTHON%" run_all.py %*
 set "EXITCODE=%ERRORLEVEL%"
 
+pause
 exit /b %EXITCODE%

@@ -33,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchkit.common import out_dir, write_manifest
+from benchkit.common import out_dir
 from benchkit.bench_defaults import (
     DEFAULT_STEPS,
     DEFAULT_TARGET_INTERVAL_MS,
@@ -59,6 +59,13 @@ from benchkit.lexicon import (
     TOOL_DATOVIZ,
 )
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
+from benchkit.output_contract import (
+    write_manifest_contract,
+    write_steps_csv,
+    write_steps_summary,
+    write_tffr_csv,
+    write_tffr_summary,
+)
 
 
 def normalize_bench_id(bench_id: str) -> str:
@@ -73,7 +80,8 @@ def _dv_app(dv: Any) -> Any:
     app_fn = getattr(dv, "app", None)
     if app_fn is None:
         return None
-    if isinstance(app_fn, ctypes._FuncPtr):
+    func_base = getattr(ctypes, "_CFuncPtr", ctypes._FuncPtr)
+    if isinstance(app_fn, func_base):
         for candidate in (None, 0, 1):
             try:
                 if candidate is None:
@@ -599,7 +607,7 @@ def main() -> None:
     ap.add_argument("--bench-id", type=str, required=True, choices=[BENCH_TFFR, BENCH_A1, BENCH_A2, "A1", "A2"])
     ap.add_argument("--format", choices=[FMT_EDF, FMT_NWB], required=True)
     ap.add_argument("--file", type=Path, required=True)
-    ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--n-ch", type=int, default=16)
     ap.add_argument("--load-start-s", type=float, default=0.0)
     ap.add_argument("--load-duration-s", type=float, default=None)
@@ -626,44 +634,81 @@ def main() -> None:
     t, data, meta, fs = load_segment(args)
 
     bench_id = args.bench_id
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out_base = out_dir(Path(args.out_root), bench_id, TOOL_DATOVIZ, args.tag)
-    write_manifest(out_base, bench_id, TOOL_DATOVIZ, vars(args), extra={"format": args.format, "meta": meta})
+    write_manifest_contract(
+        out_base,
+        bench_id=bench_id,
+        tool_id=TOOL_DATOVIZ,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=args.overlay,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"meta": meta, "cache_state": args.cache_state},
+    )
 
     if bench_id == BENCH_TFFR:
-        rows = []
-        for run_idx in range(int(args.runs)):
-            args.run_idx = run_idx
-            rows.append(run_tffr_one(t, data, fs, args))
-        df = pd.DataFrame(rows)
-        out_csv = out_base / "datoviz_tffr.csv"
-        df.to_csv(out_csv, index=False)
-        print(f"Saved: {out_csv} ({len(df)} rows)")
+        args.run_idx = 0
+        row = run_tffr_one(t, data, fs, args)
+        tffr_s = row.get("T_first_render_s")
+        tffr_ms = float(tffr_s) * 1000.0 if tffr_s is not None else float("nan")
+        write_tffr_csv(out_base, run_id=0, tffr_ms=tffr_ms)
+        write_tffr_summary(
+            out_base,
+            bench_id=BENCH_TFFR,
+            tool_id=TOOL_DATOVIZ,
+            fmt=args.format,
+            window_s=float(args.window_s),
+            n_channels=int(args.n_ch),
+            tffr_ms=tffr_ms,
+            extra={"overlay": args.overlay, "meta": meta},
+        )
         return
 
-    all_rows: List[Dict[str, Any]] = []
-    for run_idx in range(int(args.runs)):
-        args.run_idx = run_idx
-        print(f"[{args.file.name}] {args.sequence} {bench_id} run {run_idx} (steps={args.steps})")
-        rows = run_interactions_one(t, data, fs, bench_id, args.sequence, args)
-        all_rows.extend(rows)
-
-    df = pd.DataFrame(all_rows)
-    out_steps = out_base / f"datoviz_{bench_id}_steps.csv"
-    df.to_csv(out_steps, index=False)
-    print(f"Saved {out_steps} ({len(df)} rows)")
-
-    out_sum = out_base / f"datoviz_{bench_id}_summary.csv"
-    if df.empty:
-        summary = pd.DataFrame()
-        summary.to_csv(out_sum, index=False)
-        print(f"Saved {out_sum} (no rows)")
-        return
-
-    summary = summarize_step_df(df)
-    summary.to_csv(out_sum, index=False)
-    print(f"Saved {out_sum}")
-    if "lat_p95_ms" in summary.columns:
-        print(summary.groupby(["sequence"])["lat_p95_ms"].median().sort_values())
+    args.run_idx = 0
+    print(f"[{args.file.name}] {args.sequence} {bench_id} run 0 (steps={args.steps})")
+    rows = run_interactions_one(t, data, fs, bench_id, args.sequence, args)
+    steps_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        latency = row.get("latency_ms", float("nan"))
+        ok = np.isfinite(latency) and int(row.get("was_dropped", 0)) == 0
+        steps_rows.append(
+            {
+                "step_id": int(row.get("step_idx", 0)),
+                "latency_ms": float(latency) if ok else 0.0,
+                "noop": False,
+                "status": "OK" if ok else "FAIL",
+                "x0": row.get("x0"),
+                "x1": row.get("x1"),
+                "issue_late_ms": row.get("issue_late_ms"),
+                "was_dropped": row.get("was_dropped"),
+            }
+        )
+    steps_rows.sort(key=lambda r: r["step_id"])
+    write_steps_csv(out_base, steps_rows)
+    write_steps_summary(
+        out_base,
+        steps_rows,
+        extra={
+            "bench_id": bench_id,
+            "tool_id": TOOL_DATOVIZ,
+            "format": args.format,
+            "sequence": args.sequence,
+            "overlay": args.overlay,
+            "window_s": float(args.window_s),
+            "steps": int(args.steps),
+            "target_interval_ms": float(args.target_interval_ms),
+            "n_ch": int(args.n_ch),
+            "fs_hz": float(fs),
+            "meta": meta,
+        },
+    )
 
 
 if __name__ == "__main__":
