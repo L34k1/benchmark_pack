@@ -475,8 +475,55 @@ def run_interactions_one(
     _dv_run(bench.dv)
     timer.cancel()
 
+    if pending:
+        for d in pending:
+            results.append(
+                {
+                    "step_idx": d.step_idx,
+                    "x0": d.x0,
+                    "x1": d.x1,
+                    "t_sched_s": d.t_sched_s,
+                    "t_cmd_s": d.t_cmd_s,
+                    "t_paint_s": float("nan"),
+                    "latency_ms": float("nan"),
+                    "was_dropped": 1,
+                    "dropped_before": None,
+                    "issue_late_ms": (d.t_cmd_s - d.t_sched_s) * 1000.0
+                    if bench_id == BENCH_A2
+                    else float("nan"),
+                }
+            )
+
+    results_by_step = {r["step_idx"]: r for r in results}
     rows: List[Dict[str, Any]] = []
-    for r in results:
+    for step_idx, (x0, x1) in enumerate(ranges):
+        if step_idx in results_by_step:
+            r = results_by_step[step_idx]
+        else:
+            t_sched_s = (
+                (t_start + step_idx * interval_s) if (t_start is not None and bench_id == BENCH_A2) else float("nan")
+            )
+            r = {
+                "step_idx": step_idx,
+                "x0": float(x0),
+                "x1": float(x1),
+                "t_sched_s": t_sched_s,
+                "t_cmd_s": float("nan"),
+                "t_paint_s": float("nan"),
+                "latency_ms": float("nan"),
+                "was_dropped": 1,
+                "dropped_before": None,
+                "issue_late_ms": float("nan"),
+            }
+
+        lateness_ms = (
+            (r["t_paint_s"] - r["t_sched_s"]) * 1000.0
+            if bench_id == BENCH_A2
+            and np.isfinite(r.get("t_paint_s", float("nan")))
+            and np.isfinite(r.get("t_sched_s", float("nan")))
+            else float("nan")
+        )
+
         rows.append(
             {
                 "bench_id": bench_id,
@@ -493,6 +540,8 @@ def run_interactions_one(
                 "load_start_s": float(args.load_start_s),
                 "load_duration_s": float(args.load_duration_s),
                 "fs": float(fs),
+                "step_id": int(step_idx),
+                "lateness_ms": float(lateness_ms),
                 **r,
             }
         )
