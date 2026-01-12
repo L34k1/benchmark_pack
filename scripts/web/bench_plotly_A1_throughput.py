@@ -185,6 +185,10 @@ async function runSequence(gd, name, steps, intervalMs, windowS) {{
   const startRange = gd.layout.xaxis.range.slice();
   const fullMin = META.start_s;
   const fullMax = META.start_s + META.dur_s;
+  const baseSpan = startRange[1] - startRange[0];
+  const fullSpan = fullMax - fullMin;
+  const panSpan = fullSpan > 0 ? Math.min(baseSpan, fullSpan * 0.9) : baseSpan;
+  const zoomMinSpan = Math.min(fullSpan, Math.max(0.5, Math.min(baseSpan * 0.1, fullSpan * 0.25)));
 
   // Determine target path for ranges
   // PAN: shift window to the right across available duration
@@ -194,39 +198,50 @@ async function runSequence(gd, name, steps, intervalMs, windowS) {{
 
   const center0 = (startRange[0] + startRange[1]) / 2;
 
+  function panRange(t, span) {{
+    const maxShift = Math.max(0, fullSpan - span);
+    const shift = t * maxShift;
+    const a = fullMin + shift;
+    return [a, a + span];
+  }}
+
   function rangeForStep(i) {{
     const t = (steps <= 1) ? 1.0 : (i / (steps - 1));
     let a = startRange[0];
     let b = startRange[1];
 
     if (name === "PAN_60S") {{
-      // pan right by up to (dur - window)
-      const span = windowS;
-      const maxShift = Math.max(0, (fullMax - fullMin) - span);
-      const shift = t * maxShift;
-      a = fullMin + shift;
-      b = a + span;
+      const span = panSpan;
+      [a, b] = panRange(t, span);
     }} else if (name === "ZOOM_IN") {{
-      const span0 = windowS;
-      const span1 = Math.max(0.5, windowS / 10); // down to 1s if window=10s
-      const span = span0 + (span1 - span0) * t;
-      a = center0 - span/2;
-      b = center0 + span/2;
+      const span0 = baseSpan;
+      const span1 = zoomMinSpan;
+      if (Math.abs(span0 - span1) < 1e-9) {{
+        [a, b] = panRange(t, panSpan);
+      }} else {{
+        const span = span0 + (span1 - span0) * t;
+        a = center0 - span/2;
+        b = center0 + span/2;
+      }}
     }} else if (name === "ZOOM_OUT") {{
-      const span0 = Math.max(0.5, windowS / 10);
-      const span1 = Math.min(META.dur_s, windowS * 3); // up to 30s if window=10s
-      const span = span0 + (span1 - span0) * t;
-      a = center0 - span/2;
-      b = center0 + span/2;
+      const span0 = zoomMinSpan;
+      const span1 = fullSpan;
+      if (Math.abs(span0 - span1) < 1e-9) {{
+        [a, b] = panRange(t, panSpan);
+      }} else {{
+        const span = span0 + (span1 - span0) * t;
+        a = center0 - span/2;
+        b = center0 + span/2;
+      }}
     }} else if (name === "PAN_ZOOM") {{
-      const span0 = windowS;
-      const span1 = Math.max(0.75, windowS / 5);
-      const span = span0 + (span1 - span0) * t;
-
-      const maxShift = Math.max(0, (fullMax - fullMin) - span);
-      const shift = t * maxShift;
-      a = fullMin + shift;
-      b = a + span;
+      const span0 = panSpan;
+      const span1 = Math.min(span0, Math.max(zoomMinSpan, span0 * 0.5));
+      if (Math.abs(span0 - span1) < 1e-9) {{
+        [a, b] = panRange(t, panSpan);
+      }} else {{
+        const span = span0 + (span1 - span0) * t;
+        [a, b] = panRange(t, span);
+      }}
     }}
 
     // Clamp inside full extent
