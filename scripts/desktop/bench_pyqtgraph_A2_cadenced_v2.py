@@ -85,37 +85,55 @@ def _clamp_range(x0: float, x1: float, lo: float, hi: float) -> Tuple[float, flo
     return x0, x1
 
 
+def _apply_pan(x0: float, x1: float, pan_step: float, lo: float, hi: float) -> Tuple[float, float, float]:
+    next_x0, next_x1 = x0 + pan_step, x1 + pan_step
+    if next_x0 < lo or next_x1 > hi:
+        pan_step *= -1.0
+        next_x0, next_x1 = x0 + pan_step, x1 + pan_step
+    return next_x0, next_x1, pan_step
+
+
 def build_ranges(sequence: str, lo: float, hi: float, window_s: float, steps: int) -> List[Tuple[float, float]]:
     x0, x1 = lo, min(lo + window_s, hi)
     w = x1 - x0
     pan_step = w * PAN_STEP_FRACTION
     rng: List[Tuple[float, float]] = []
+    min_span = window_s * 0.10
+    eps = 1e-9
 
     for i in range(steps):
         if sequence == SEQ_PAN:
-            x0, x1 = x0 + pan_step, x1 + pan_step
-            if x1 > hi or x0 < lo:
-                pan_step *= -1.0
+            x0, x1, pan_step = _apply_pan(x0, x1, pan_step, lo, hi)
 
         elif sequence == SEQ_ZOOM_IN:
             cx = 0.5 * (x0 + x1)
-            w = max(w * ZOOM_IN_FACTOR, window_s * 0.10)
-            x0, x1 = cx - 0.5 * w, cx + 0.5 * w
+            next_w = max(w * ZOOM_IN_FACTOR, min_span)
+            if abs(next_w - w) <= eps * max(1.0, w):
+                x0, x1, pan_step = _apply_pan(x0, x1, pan_step, lo, hi)
+            else:
+                w = next_w
+                x0, x1 = cx - 0.5 * w, cx + 0.5 * w
 
         elif sequence == SEQ_ZOOM_OUT:
             cx = 0.5 * (x0 + x1)
-            w = min(w * ZOOM_OUT_FACTOR, hi - lo)
-            x0, x1 = cx - 0.5 * w, cx + 0.5 * w
+            next_w = min(w * ZOOM_OUT_FACTOR, hi - lo)
+            if abs(next_w - w) <= eps * max(1.0, w):
+                x0, x1, pan_step = _apply_pan(x0, x1, pan_step, lo, hi)
+            else:
+                w = next_w
+                x0, x1 = cx - 0.5 * w, cx + 0.5 * w
 
         elif sequence == SEQ_PAN_ZOOM:
             if i % 2 == 0:
-                x0, x1 = x0 + pan_step, x1 + pan_step
-                if x1 > hi or x0 < lo:
-                    pan_step *= -1.0
+                x0, x1, pan_step = _apply_pan(x0, x1, pan_step, lo, hi)
             else:
                 cx = 0.5 * (x0 + x1)
-                w = max(min(w * ZOOM_IN_FACTOR, hi - lo), window_s * 0.10)
-                x0, x1 = cx - 0.5 * w, cx + 0.5 * w
+                next_w = max(min(w * ZOOM_IN_FACTOR, hi - lo), min_span)
+                if abs(next_w - w) <= eps * max(1.0, w):
+                    x0, x1, pan_step = _apply_pan(x0, x1, pan_step, lo, hi)
+                else:
+                    w = next_w
+                    x0, x1 = cx - 0.5 * w, cx + 0.5 * w
         else:
             raise ValueError(sequence)
 
@@ -162,6 +180,10 @@ def main() -> None:
     p.add_argument("--run-timeout-s", type=float, default=180.0)
     p.add_argument("--step-delay-ms", type=int, default=0)
     args = p.parse_args()
+    # A2 runs are fixed at 200 steps for consistent cadence targets.
+    if args.steps != DEFAULT_STEPS:
+        _log(f"config=force_steps value={DEFAULT_STEPS} requested={args.steps}")
+    args.steps = DEFAULT_STEPS
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
@@ -266,10 +288,18 @@ def main() -> None:
                     ]
                 )
 
-        lat_ms = [row["latency_ms"] for row in steps_rows if row["status"] in ("OK", "NOOP")]
-        lateness_ms = [row["lateness_ms"] for row in steps_rows if row["status"] in ("OK", "NOOP")]
+        lat_ms = [row["latency_ms"] for row in steps_rows if row["status"] == "OK"]
+        lateness_ms = [row["lateness_ms"] for row in steps_rows if row["status"] == "OK"]
         arr = np.asarray(lateness_ms, dtype=float)
         summary = summarize_latency_ms(lat_ms)
+        if arr.size:
+            lateness_p50_ms = float(np.percentile(arr, 50))
+            lateness_p95_ms = float(np.percentile(arr, 95))
+            lateness_max_ms = float(np.max(arr))
+        else:
+            lateness_p50_ms = float("nan")
+            lateness_p95_ms = float("nan")
+            lateness_max_ms = float("nan")
         summary.update({
             "bench_id": BENCH_A2,
             "tool_id": TOOL_PG,
@@ -279,9 +309,9 @@ def main() -> None:
             "window_s": float(args.window_s),
             "steps": int(args.steps),
             "target_interval_ms": float(args.target_interval_ms),
-            "lateness_p50_ms": float(np.percentile(arr, 50)),
-            "lateness_p95_ms": float(np.percentile(arr, 95)),
-            "lateness_max_ms": float(np.max(arr)),
+            "lateness_p50_ms": lateness_p50_ms,
+            "lateness_p95_ms": lateness_p95_ms,
+            "lateness_max_ms": lateness_max_ms,
             "requested_n_ch": requested_n_ch,
             "available_n_ch": available_n_ch,
             "effective_n_ch": effective_n_ch,
@@ -372,7 +402,15 @@ def main() -> None:
         if not _range_close(requested, clamped):
             clamped_reason = "clamped"
         if noop:
-            clamped_reason = "noop"
+            pan_step = old_span * PAN_STEP_FRACTION
+            nudged_x0, nudged_x1, _ = _apply_pan(old_x0, old_x1, pan_step, lo, hi)
+            if abs(nudged_x0 - old_x0) > eps or abs(nudged_x1 - old_x1) > eps:
+                clamped = (nudged_x0, nudged_x1)
+                new_span = float(clamped[1] - clamped[0])
+                noop = False
+                clamped_reason = "nudged"
+            else:
+                clamped_reason = "noop"
         _log(
             "phase=step idx=%d seq=%s old_x=(%.6f,%.6f) req_x=(%.6f,%.6f) clamp_x=(%.6f,%.6f) "
             "span_old=%.6f span_new=%.6f reason=%s"
