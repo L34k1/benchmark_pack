@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 
 import argparse
-import csv
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -15,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.common import ensure_dir, env_info, out_dir
 from benchkit.bench_defaults import (
     DEFAULT_STEPS,
     DEFAULT_WINDOW_S,
@@ -37,7 +36,7 @@ from benchkit.lexicon import (
     SEQ_PAN_ZOOM,
 )
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
-from benchkit.stats import summarize_latency_ms
+from benchkit.output_contract import write_manifest_contract, write_steps_csv, write_steps_summary
 
 
 def now_ms() -> float:
@@ -128,6 +127,7 @@ def main() -> None:
 
     p.add_argument("--sequence", choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM], default=SEQ_PAN_ZOOM)
     p.add_argument("--steps", type=int, default=DEFAULT_STEPS)
+    p.add_argument("--runs", type=int, default=1)
 
     p.add_argument("--n-ch", type=int, default=16)
     p.add_argument("--load-start-s", type=float, default=0.0)
@@ -142,9 +142,25 @@ def main() -> None:
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out = out_dir(args.out_root, BENCH_A1, TOOL_VISPY, args.tag)
     ensure_dir(out)
-    write_manifest(out, BENCH_A1, TOOL_VISPY, args=vars(args), extra={"env": env_info()})
+    write_manifest_contract(
+        out,
+        bench_id=BENCH_A1,
+        tool_id=TOOL_VISPY,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=args.overlay,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"env": env_info()},
+    )
 
     t, d, meta = load_segment(args)
 
@@ -215,36 +231,46 @@ def main() -> None:
         pid: (presented_at_ms[idx], latency_ms[idx], dropped_before[idx]) for idx, pid in enumerate(presented_id)
     }
 
-    steps_csv = out / "steps.csv"
-    with steps_csv.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(
-            [
-                "step_idx",
-                "issued_ms",
-                "presented_ms",
-                "latency_ms",
-                "dropped_before",
-                "was_dropped",
-            ]
-        )
-        for step_idx in range(len(ranges)):
-            issued = issued_ms[step_idx] if step_idx < len(issued_ms) else float("nan")
-            if step_idx in presented_lookup:
-                presented, latency, drop = presented_lookup[step_idx]
-                w.writerow([step_idx, f"{issued:.3f}", f"{presented:.3f}", f"{latency:.3f}", drop, 0])
-            else:
-                w.writerow([step_idx, f"{issued:.3f}" if issued == issued else "", "", "", "", 1])
+    steps_rows: List[Dict[str, Any]] = []
+    for step_idx in range(len(ranges)):
+        issued = issued_ms[step_idx] if step_idx < len(issued_ms) else float("nan")
+        if step_idx in presented_lookup:
+            presented, latency, drop = presented_lookup[step_idx]
+            steps_rows.append(
+                {
+                    "step_id": step_idx,
+                    "latency_ms": float(latency),
+                    "noop": False,
+                    "status": "OK",
+                    "issued_ms": float(issued),
+                    "presented_ms": float(presented),
+                    "dropped_before": int(drop),
+                    "was_dropped": 0,
+                }
+            )
+        else:
+            steps_rows.append(
+                {
+                    "step_id": step_idx,
+                    "latency_ms": 0.0,
+                    "noop": False,
+                    "status": "FAIL",
+                    "issued_ms": float(issued) if issued == issued else float("nan"),
+                    "presented_ms": float("nan"),
+                    "dropped_before": None,
+                    "was_dropped": 1,
+                }
+            )
 
-    summary = summarize_latency_ms(latency_ms)
+    write_steps_csv(out, steps_rows)
     total_time_s = (
         max(1e-6, (max(presented_at_ms) - min(issued_ms)) / 1000.0) if presented_at_ms else float("nan")
     )
     fps = (len(presented_id) / total_time_s) if total_time_s == total_time_s else float("nan")
-
-    write_json(
-        out / "summary.json",
-        {
+    write_steps_summary(
+        out,
+        steps_rows,
+        extra={
             "bench_id": BENCH_A1,
             "tool_id": TOOL_VISPY,
             "format": args.format,
@@ -254,7 +280,6 @@ def main() -> None:
             "steps_issued": int(args.steps),
             "frames_presented": int(len(presented_id)),
             "fps_presented": float(fps),
-            **summary,
             "meta": meta,
         },
     )

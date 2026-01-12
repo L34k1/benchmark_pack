@@ -4,6 +4,7 @@ import sys
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -13,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchkit.common import ensure_dir, env_info, out_dir, write_json, write_manifest
+from benchkit.common import ensure_dir, env_info, out_dir, write_json
 from benchkit.bench_defaults import (
     DEFAULT_STEPS,
     DEFAULT_TARGET_INTERVAL_MS,
@@ -38,6 +39,14 @@ from benchkit.lexicon import (
     TOOL_D3,
 )
 from benchkit.loaders import decimate_for_display, load_edf_segment_pyedflib, load_nwb_segment_pynwb
+from benchkit.output_contract import (
+    steps_from_latencies,
+    write_manifest_contract,
+    write_steps_csv,
+    write_steps_summary,
+    write_tffr_csv,
+    write_tffr_summary,
+)
 
 
 D3_CDN = "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"
@@ -330,6 +339,15 @@ run().catch(e => console.error('BENCH_ERROR', e));
 """
 
 
+def collect_bench_json(html_path: Path, out_json: Path) -> dict:
+    script = REPO_ROOT / "scripts" / "web" / "collect_console_playwright.py"
+    subprocess.run(
+        [sys.executable, str(script), "--html", str(html_path), "--out", str(out_json)],
+        check=True,
+    )
+    return json.loads(out_json.read_text(encoding="utf-8"))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate D3.js benchmark HTML (TFFR/A1/A2).")
     p.add_argument("--bench-id", choices=[BENCH_TFFR, BENCH_A1, BENCH_A2], required=True)
@@ -341,6 +359,7 @@ def main() -> None:
     p.add_argument("--sequence", choices=[SEQ_PAN, SEQ_ZOOM_IN, SEQ_ZOOM_OUT, SEQ_PAN_ZOOM], default=SEQ_PAN_ZOOM)
     p.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     p.add_argument("--target-interval-ms", type=float, default=DEFAULT_TARGET_INTERVAL_MS)
+    p.add_argument("--runs", type=int, default=1)
 
     p.add_argument("--n-ch", type=int, default=16)
     p.add_argument("--load-start-s", type=float, default=0.0)
@@ -352,13 +371,30 @@ def main() -> None:
     p.add_argument("--nwb-series-path", type=str, default=None)
     p.add_argument("--nwb-time-dim", type=str, default="auto", choices=["auto", "time_first", "time_last"])
     p.add_argument("--d3-module", action="store_true", help="Use ESM module import for D3.js")
+    p.add_argument("--no-collect", action="store_true", help="Skip Playwright collection step.")
     args = p.parse_args()
     if args.load_duration_s is None:
         args.load_duration_s = default_load_duration_s(args.window_s)
 
+    if args.runs != 1:
+        print(f"[WARN] forcing runs=1 (requested {args.runs})")
+        args.runs = 1
     out = out_dir(args.out_root, args.bench_id, TOOL_D3, args.tag)
     ensure_dir(out)
-    write_manifest(out, args.bench_id, TOOL_D3, args=vars(args), extra={"env": env_info()})
+    write_manifest_contract(
+        out,
+        bench_id=args.bench_id,
+        tool_id=TOOL_D3,
+        fmt=args.format,
+        file_path=args.file,
+        window_s=float(args.window_s),
+        n_channels=int(args.n_ch),
+        sequence=args.sequence,
+        overlay=args.overlay,
+        run_id=0,
+        steps_target=int(args.steps),
+        extra={"env": env_info()},
+    )
 
     t, d, meta = load_segment(args)
     offsets = np.arange(d.shape[0], dtype=np.float32)[:, None]
@@ -390,8 +426,45 @@ def main() -> None:
     html_path = out / "d3_bench.html"
     html_path.write_text(html, encoding="utf-8")
     write_json(out / "html_manifest.json", {"html": str(html_path)})
+    if args.no_collect:
+        print(str(html_path))
+        return
 
-    print(str(html_path))
+    bench_json = collect_bench_json(html_path, out / "bench.json")
+    if args.bench_id == BENCH_TFFR:
+        tffr_ms = float(bench_json.get("tffr_ms", float("nan")))
+        write_tffr_csv(out, run_id=0, tffr_ms=tffr_ms)
+        write_tffr_summary(
+            out,
+            bench_id=BENCH_TFFR,
+            tool_id=TOOL_D3,
+            fmt=args.format,
+            window_s=float(args.window_s),
+            n_channels=int(args.n_ch),
+            tffr_ms=tffr_ms,
+            extra={"overlay": args.overlay, "meta": bench_json.get("meta")},
+        )
+        return
+
+    lat_ms = bench_json.get("lat_ms", [])
+    steps_rows = steps_from_latencies(lat_ms, steps_target=int(args.steps))
+    write_steps_csv(out, steps_rows)
+    write_steps_summary(
+        out,
+        steps_rows,
+        extra={
+            "bench_id": args.bench_id,
+            "tool_id": TOOL_D3,
+            "format": args.format,
+            "sequence": args.sequence,
+            "overlay": args.overlay,
+            "window_s": float(args.window_s),
+            "steps": int(args.steps),
+            "target_interval_ms": float(args.target_interval_ms),
+            "meta": bench_json.get("meta"),
+            "frames_presented": bench_json.get("frames_presented"),
+        },
+    )
 
 
 if __name__ == "__main__":
